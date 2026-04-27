@@ -3,12 +3,14 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from PIL import Image
 
 from src.app_discovery import _group_for_name
 from src.folder_manager import _merge_desktop_ini, read_folder_icon
 import src.folder_manager as folder_manager
+import src.icon_pipeline as icon_pipeline
 from src.icon_pipeline import output_path_for, process_icon
 from src.mapping_store import MappingStore
 import src.reapply_service as reapply_service
@@ -38,6 +40,27 @@ class IconPipelineTests(unittest.TestCase):
                 self.assertIn((96, 96), ico.ico.sizes())
             with Image.open(processed.png_output_path) as png:
                 self.assertEqual(png.size, (1024, 1024))
+
+    def test_process_icon_reuses_square_canvas_for_png_and_ico(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            input_dir = base / "icons-in"
+            output_dir = base / "icons-out"
+            source = input_dir / "square-check.png"
+            source.parent.mkdir(parents=True)
+            Image.new("RGBA", (80, 48), (20, 40, 60, 255)).save(source)
+
+            original_fit = icon_pipeline._fit_square_canvas
+            with mock.patch("src.icon_pipeline._fit_square_canvas", wraps=original_fit) as fit_square:
+                process_icon(
+                    input_dir,
+                    output_dir,
+                    source,
+                    remove_white_background=False,
+                    remove_corner_marks=False,
+                )
+
+            self.assertEqual(fit_square.call_count, 1)
 
 
 class MappingStoreTests(unittest.TestCase):

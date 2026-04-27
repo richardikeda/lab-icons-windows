@@ -35,6 +35,31 @@ from src.startup_manager import StartupError, disable_startup_reapply, enable_st
 from src.windows_native import apply_native_window_style
 
 
+DISCOVERED_IDLE_LIMIT = 120
+DISCOVERED_SEARCH_LIMIT = 70
+DISCOVERED_SEARCH_DEBOUNCE_MS = 180
+
+
+def discovered_search_text(target: DiscoveredTarget) -> str:
+    return f"{target.name} {target.group} {target.path}".casefold()
+
+
+def filter_discovered_targets(
+    targets: list[DiscoveredTarget],
+    index: dict[str, str],
+    query: str,
+) -> list[DiscoveredTarget]:
+    terms = query.casefold().split()
+    if not terms:
+        return targets
+    matched = []
+    for target in targets:
+        text = index.get(target.key) or discovered_search_text(target)
+        if all(term in text for term in terms):
+            matched.append(target)
+    return matched
+
+
 class IconMapperApp(ctk.CTk):
     def __init__(self, base_dir: Path) -> None:
         super().__init__()
@@ -51,10 +76,12 @@ class IconMapperApp(ctk.CTk):
         self.source_pngs: list[Path] = []
         self.available_icons: list[Path] = []
         self.discovered_targets: list[DiscoveredTarget] = []
+        self.discovered_search_index: dict[str, str] = {}
         self.icon_images: dict[tuple[Path, int], ctk.CTkImage] = {}
         self.process_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.processing = False
         self._icons_snapshot: tuple[tuple[str, float], ...] = ()
+        self._discovered_render_after: str | None = None
 
         migrate_legacy_icons(self.output_dir)
         ctk.set_appearance_mode("system")
@@ -167,7 +194,7 @@ class IconMapperApp(ctk.CTk):
             placeholder_text_color="#98a6ba",
         )
         self.discovered_filter.grid(row=0, column=0, padx=16, pady=(0, 8), sticky="ew")
-        self.discovered_filter.bind("<KeyRelease>", lambda _: self.refresh_discovered_list())
+        self.discovered_filter.bind("<KeyRelease>", self._schedule_discovered_filter)
         self.mapping_list = ctk.CTkScrollableFrame(self.list_stack, fg_color="transparent", label_text="")
         self.discovered_list = ctk.CTkScrollableFrame(self.list_stack, fg_color="transparent", label_text="")
         self.mapping_list.grid(row=1, column=0, padx=8, pady=0, sticky="nsew")
@@ -570,9 +597,23 @@ class IconMapperApp(ctk.CTk):
 
     def _discover_worker(self) -> None:
         started = time.perf_counter()
-        self.discovered_targets = discover_targets()
-        self.perf.log("discovery.targets", (time.perf_counter() - started) * 1000, items=len(self.discovered_targets))
+        targets = discover_targets()
+        index = {target.key: discovered_search_text(target) for target in targets}
+        self.discovered_targets = targets
+        self.discovered_search_index = index
+        self.perf.log("discovery.targets", (time.perf_counter() - started) * 1000, items=len(targets))
         self.after(0, self.refresh_discovered_list)
+
+    def _schedule_discovered_filter(self, _event: object | None = None) -> None:
+        if hasattr(self, "target_tabs") and self.target_tabs.get() != "Detectados":
+            return
+        if self._discovered_render_after:
+            self.after_cancel(self._discovered_render_after)
+        self._discovered_render_after = self.after(DISCOVERED_SEARCH_DEBOUNCE_MS, self._run_scheduled_discovered_filter)
+
+    def _run_scheduled_discovered_filter(self) -> None:
+        self._discovered_render_after = None
+        self.refresh_discovered_list()
 
     def refresh_discovered_list(self) -> None:
         if hasattr(self, "target_tabs") and self.target_tabs.get() != "Detectados":
@@ -580,17 +621,26 @@ class IconMapperApp(ctk.CTk):
         started = time.perf_counter()
         for child in self.discovered_list.winfo_children():
             child.destroy()
-        needle = self.discovered_filter.get().strip().lower() if hasattr(self, "discovered_filter") else ""
+        needle = self.discovered_filter.get().strip() if hasattr(self, "discovered_filter") else ""
         custom_keys = {mapping.known_key for mapping in self.store.mappings if mapping.known_key}
         grouped: dict[str, list[DiscoveredTarget]] = defaultdict(list)
-        for target in self.discovered_targets:
-            text = f"{target.name} {target.group} {target.path}".lower()
-            if needle and needle not in text:
-                continue
+        matched_targets = filter_discovered_targets(self.discovered_targets, self.discovered_search_index, needle)
+        limit = DISCOVERED_SEARCH_LIMIT if needle else DISCOVERED_IDLE_LIMIT
+        visible_targets = matched_targets[:limit]
+        for target in visible_targets:
             grouped[target.group].append(target)
         if not grouped:
             ctk.CTkLabel(self.discovered_list, text="Nenhum item encontrado nesse filtro.", text_color="#aab7cc").pack(anchor="w", padx=10, pady=10)
             return
+        if len(matched_targets) > len(visible_targets):
+            ctk.CTkLabel(
+                self.discovered_list,
+                text=f"Mostrando {len(visible_targets)} de {len(matched_targets)}. Refine o filtro para ver menos itens.",
+                text_color="#9aa8bc",
+                wraplength=250,
+                justify="left",
+                font=ctk.CTkFont(size=11),
+            ).pack(anchor="w", padx=10, pady=(0, 8))
         for group, targets in sorted(grouped.items()):
             ctk.CTkLabel(
                 self.discovered_list,
@@ -598,9 +648,15 @@ class IconMapperApp(ctk.CTk):
                 text_color="#9aa8bc",
                 font=ctk.CTkFont(size=10, weight="bold"),
             ).pack(anchor="w", padx=10, pady=(12, 4))
-            for target in targets[:120]:
+            for target in targets:
                 self._render_discovered_row(target, "customizado" if target.key in custom_keys else "disponivel", target.key in custom_keys)
-        self.perf.log("ui.refresh_discovered_list.render", (time.perf_counter() - started) * 1000, items=sum(len(items) for items in grouped.values()))
+        self.perf.log(
+            "ui.refresh_discovered_list.render",
+            (time.perf_counter() - started) * 1000,
+            items=len(visible_targets),
+            matches=len(matched_targets),
+            query=bool(needle),
+        )
 
     def start_processing(self) -> None:
         if self.processing:

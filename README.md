@@ -59,6 +59,7 @@ A opcao global cria um atalho na pasta Startup do usuario. Ao iniciar o Windows,
 - O arquivo `config/mappings.json` so e regravado quando ha mudancas reais, usando troca atomica para reduzir IO e evitar JSON parcial se o app for interrompido durante o salvamento.
 - O carregamento de `mappings.json` aceita UTF-8, UTF-8 com BOM e UTF-16 para tolerar arquivos salvos por ferramentas do Windows.
 - Arquivos locais de mapeamento vazios ou contendo apenas comentarios sao tratados como configuracao inicial, o que permite usar placeholders redigidos sem impedir a abertura do app.
+- A geracao de cada icone reutiliza a mesma base quadrada para PNG e ICO, cortando uma etapa de preparo por arquivo e reduzindo CPU em lotes maiores.
 - Logs de performance sao gravados em `config/performance.log`.
 - O comando `python app.py --perf-smoke` mede o carregamento da janela sem abrir o app para uso normal.
 

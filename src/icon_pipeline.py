@@ -79,8 +79,10 @@ def process_icon(
         image = remove_edge_white_background(image)
     if remove_corner_marks:
         image = soften_corner_marks(image)
-    save_clean_png(image, png_output_path)
-    save_as_ico(image, ico_path)
+    # Reuse the squared image for both outputs to avoid duplicate canvas prep per icon.
+    square = _fit_square_canvas(image)
+    save_clean_png(square, png_output_path)
+    save_as_ico(square, ico_path)
     return ProcessedIcon(
         source_path=png_path,
         output_path=ico_path,
@@ -141,15 +143,14 @@ def soften_corner_marks(image: Image.Image) -> Image.Image:
 
 
 def save_as_ico(image: Image.Image, output_path: Path) -> None:
-    square = _prepare_ico_master(_fit_square_canvas(image))
-    square.save(output_path, format="ICO", sizes=[(size, size) for size in ICON_SIZES])
+    master = _prepare_ico_master(image)
+    master.save(output_path, format="ICO", sizes=[(size, size) for size in ICON_SIZES])
 
 
 def save_clean_png(image: Image.Image, output_path: Path) -> None:
-    square = _fit_square_canvas(image)
-    if square.size != (CLEAN_PNG_SIZE, CLEAN_PNG_SIZE):
-        square = square.resize((CLEAN_PNG_SIZE, CLEAN_PNG_SIZE), Image.Resampling.LANCZOS)
-    square.save(output_path, format="PNG", optimize=True)
+    if image.size != (CLEAN_PNG_SIZE, CLEAN_PNG_SIZE):
+        image = image.resize((CLEAN_PNG_SIZE, CLEAN_PNG_SIZE), Image.Resampling.LANCZOS)
+    image.save(output_path, format="PNG", optimize=True)
 
 
 def migrate_legacy_icons(output_dir: Path) -> None:
