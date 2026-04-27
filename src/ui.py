@@ -8,7 +8,7 @@ import hashlib
 import json
 from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
 
@@ -38,7 +38,14 @@ from src.perf_logger import PerfLogger
 from src.reapply_service import apply_mapping, capture_original_icon, reapply_changed, restore_mapping
 from src.shortcut_manager import ShortcutError
 from src.startup_manager import StartupError, disable_startup_reapply, enable_startup_reapply, is_startup_reapply_enabled
-from src.theme_manager import ThemeImportError, delete_theme, import_theme
+from src.theme_manager import ThemeImportError, ThemeImportResult, delete_theme, import_theme
+from src.theme_matching import (
+    ThemeReviewItem,
+    apply_confirmed_theme_items,
+    associate_manually,
+    build_theme_review,
+    confirm_suggestion,
+)
 from src.windows_native import apply_native_window_style
 
 
@@ -145,6 +152,177 @@ def filter_discovered_targets(
         if all(term in text for term in terms):
             matched.append(target)
     return matched
+
+
+class ThemeReviewWindow(ctk.CTkToplevel):
+    def __init__(self, app: "IconMapperApp", result: ThemeImportResult, items: list[ThemeReviewItem]) -> None:
+        super().__init__(app)
+        self.app = app
+        self.result = result
+        self.items = items
+        self.title(f"Tema: {result.theme_name}")
+        self.geometry("1100x720")
+        self.minsize(920, 620)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        header = ctk.CTkFrame(self, fg_color="#1f2f4a", corner_radius=0)
+        header.grid(row=0, column=0, sticky="ew")
+        header.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            header,
+            text=f"{result.theme_name} | {len(result.png_paths)} PNG(s)",
+            text_color="#e5edf8",
+            font=ctk.CTkFont(size=18, weight="bold"),
+        ).grid(row=0, column=0, padx=16, pady=14, sticky="w")
+        ctk.CTkButton(
+            header,
+            text="Aplicar tema inteiro",
+            command=self._apply_confirmed,
+            fg_color="#256f54",
+            hover_color="#2e8465",
+        ).grid(row=0, column=1, padx=(0, 8), pady=12)
+        ctk.CTkButton(
+            header,
+            text="Excluir tema",
+            command=self._delete_theme,
+            fg_color="#6f2f3a",
+            hover_color="#8a3d49",
+        ).grid(row=0, column=2, padx=(0, 16), pady=12)
+
+        self.tabs = ctk.CTkTabview(self, fg_color="#17243a", segmented_button_fg_color="#233655")
+        self.tabs.grid(row=1, column=0, padx=14, pady=14, sticky="nsew")
+        self.frames: dict[str, ctk.CTkScrollableFrame] = {}
+        for title in ("Encontrados", "Sugestoes", "Nao encontrados", "Erros"):
+            tab = self.tabs.add(title)
+            tab.grid_columnconfigure(0, weight=1)
+            frame = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+            frame.grid(row=0, column=0, sticky="nsew")
+            tab.grid_rowconfigure(0, weight=1)
+            self.frames[title] = frame
+        self._render()
+        self.lift()
+        self.focus_force()
+
+    def _render(self) -> None:
+        for frame in self.frames.values():
+            for child in frame.winfo_children():
+                child.destroy()
+        groups = {
+            "Encontrados": [item for item in self.items if item.status in {"found", "manual"} and item.confirmed],
+            "Sugestoes": [item for item in self.items if item.status == "suggestion"],
+            "Nao encontrados": [item for item in self.items if item.status == "missing"],
+            "Erros": [item for item in self.items if item.status == "error"],
+        }
+        for title, items in groups.items():
+            frame = self.frames[title]
+            if not items:
+                ctk.CTkLabel(frame, text="Nenhum item nesta secao.", text_color="#9aa8bc").pack(anchor="w", padx=10, pady=10)
+                continue
+            for item in items:
+                self._render_item(frame, item)
+
+    def _render_item(self, parent: ctk.CTkScrollableFrame, item: ThemeReviewItem) -> None:
+        row = ctk.CTkFrame(parent, fg_color="#223450", corner_radius=8)
+        row.pack(fill="x", padx=8, pady=6)
+        row.grid_columnconfigure(1, weight=1)
+        preview = self.app._preview_image(item.icon_path, size=38)
+        ctk.CTkLabel(row, image=preview, text="", width=46).grid(row=0, column=0, rowspan=3, padx=8, pady=8)
+        target_name = item.target.name if item.target else "Sem destino"
+        score = f" | sugestao {item.suggestion_score:.0%}" if item.status == "suggestion" else ""
+        ctk.CTkLabel(
+            row,
+            text=item.icon_path.name,
+            text_color="#e5edf8",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            anchor="w",
+        ).grid(row=0, column=1, padx=4, pady=(8, 0), sticky="ew")
+        ctk.CTkLabel(
+            row,
+            text=f"Programa esperado: {item.expected_program or '-'}",
+            text_color="#b8c4d6",
+            anchor="w",
+        ).grid(row=1, column=1, padx=4, sticky="ew")
+        ctk.CTkLabel(
+            row,
+            text=f"Destino: {target_name}{score}",
+            text_color="#9fb0c7",
+            anchor="w",
+        ).grid(row=2, column=1, padx=4, pady=(0, 8), sticky="ew")
+        if item.status == "suggestion":
+            ctk.CTkButton(row, text="Confirmar sugestao", command=lambda selected=item: self._confirm(selected), width=150).grid(
+                row=0, column=2, padx=8, pady=(8, 2), sticky="ew"
+            )
+        ctk.CTkButton(row, text="Associar manualmente", command=lambda selected=item: self._associate(selected), width=150).grid(
+            row=1, column=2, padx=8, pady=2, sticky="ew"
+        )
+        ctk.CTkButton(row, text="Ignorar item", command=lambda selected=item: self._ignore(selected), width=150).grid(
+            row=2, column=2, padx=8, pady=(2, 8), sticky="ew"
+        )
+
+    def _confirm(self, item: ThemeReviewItem) -> None:
+        self._replace_item(item, confirm_suggestion(item))
+
+    def _ignore(self, item: ThemeReviewItem) -> None:
+        self._replace_item(item, replace(item, status="missing", target=None, confirmed=False))
+
+    def _associate(self, item: ThemeReviewItem) -> None:
+        choices = {f"{target.name} | {target.group}": target for target in self.app.discovered_targets}
+        if not choices:
+            messagebox.showinfo("Associar manualmente", "A descoberta de destinos ainda nao terminou.")
+            return
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Associar manualmente")
+        dialog.geometry("560x170")
+        dialog.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(dialog, text=f"Destino para {item.expected_program}", text_color="#e5edf8").grid(
+            row=0, column=0, padx=16, pady=(16, 8), sticky="w"
+        )
+        selected = ctk.StringVar(value=next(iter(choices)))
+        ctk.CTkComboBox(dialog, values=list(choices), variable=selected).grid(row=1, column=0, padx=16, pady=8, sticky="ew")
+        ctk.CTkButton(
+            dialog,
+            text="Associar",
+            command=lambda: self._finish_associate(dialog, item, choices[selected.get()]),
+        ).grid(row=2, column=0, padx=16, pady=(8, 16), sticky="e")
+
+    def _finish_associate(self, dialog: ctk.CTkToplevel, item: ThemeReviewItem, target: DiscoveredTarget) -> None:
+        dialog.destroy()
+        self._replace_item(item, associate_manually(self.result, item, target))
+
+    def _replace_item(self, old: ThemeReviewItem, new: ThemeReviewItem) -> None:
+        self.items = [new if item is old else item for item in self.items]
+        self._render()
+
+    def _apply_confirmed(self) -> None:
+        self.app.apply_theme_review_items(self.result, list(self.items))
+
+    def _delete_theme(self) -> None:
+        if not messagebox.askyesno("Excluir tema", f"Excluir arquivos do tema '{self.result.theme_name}' e seus mapeamentos?"):
+            return
+        try:
+            delete_theme(self.result.theme_name, self.app.input_dir)
+        except ThemeImportError as exc:
+            messagebox.showerror("Excluir tema", str(exc))
+            return
+        kept = []
+        errors = 0
+        for mapping in self.app.store.mappings:
+            if mapping.theme_name.casefold() != self.result.theme_name.casefold():
+                kept.append(mapping)
+                continue
+            if mapping.is_customized:
+                try:
+                    restore_mapping(mapping)
+                except (ShortcutError, FolderIconError):
+                    errors += 1
+        self.app.store.mappings = kept
+        self.app.store.save()
+        self.app.refresh_icons()
+        self.app.refresh_mapping_list()
+        self.app.refresh_discovered_list()
+        self.app.set_status(f"Tema '{self.result.theme_name}' excluido. Erros ao restaurar: {errors}.")
+        self.destroy()
 
 
 class IconMapperApp(ctk.CTk):
@@ -1099,9 +1277,10 @@ class IconMapperApp(ctk.CTk):
             messagebox.showerror("Importar tema", str(exc))
             return
         self.refresh_icons()
-        created = self._create_theme_mappings(result.theme_name, result.associations)
-        self.perf.log("themes.import", (time.perf_counter() - started) * 1000, items=len(result.png_paths), mappings=created)
-        self.set_status(f"Tema '{result.theme_name}' importado: {len(result.png_paths)} PNG(s), {created} associacao(oes).")
+        review = build_theme_review(result, self.discovered_targets)
+        self.perf.log("themes.import", (time.perf_counter() - started) * 1000, items=len(result.png_paths), mappings=0)
+        ThemeReviewWindow(self, result, review)
+        self.set_status(f"Tema '{result.theme_name}' importado para revisao: {len(result.png_paths)} PNG(s).")
 
     def delete_theme_package(self) -> None:
         theme = simpledialog.askstring("Excluir tema", "Nome do tema importado:")
@@ -1182,6 +1361,67 @@ class IconMapperApp(ctk.CTk):
         self.refresh_mapping_list()
         self.refresh_discovered_list()
         return created
+
+    def apply_theme_review_items(self, result: ThemeImportResult, items: list[ThemeReviewItem]) -> None:
+        self.set_status(f"Aplicando tema '{result.theme_name}'...")
+        threading.Thread(target=self._apply_theme_review_worker, args=(result, items), daemon=True).start()
+
+    def _apply_theme_review_worker(self, result: ThemeImportResult, items: list[ThemeReviewItem]) -> None:
+        summary = apply_confirmed_theme_items(
+            theme_name=result.theme_name,
+            items=items,
+            store=self.store,
+            input_dir=self.input_dir,
+            output_dir=self.output_dir,
+            ensure_mapping=self._ensure_theme_review_mapping,
+        )
+        self.after(0, lambda: self._finish_theme_review_apply(result.theme_name, summary))
+
+    def _finish_theme_review_apply(self, theme_name: str, summary: object) -> None:
+        self.refresh_icons()
+        self.refresh_mapping_list()
+        self.refresh_discovered_list()
+        detail = f"Aplicados: {summary.applied}. Ignorados: {summary.ignored}. Erros: {summary.errors}."
+        messagebox.showinfo("Aplicar tema inteiro", detail)
+        self.set_status(f"Tema '{theme_name}' aplicado. {detail}")
+
+    def _ensure_theme_review_mapping(self, item: ThemeReviewItem, generated: Path) -> AppMapping | None:
+        if item.target is None:
+            return None
+        target = item.target
+        if target.target_type == "appx":
+            try:
+                target_path = create_managed_appx_shortcut(
+                    target.path,
+                    target.name,
+                    self.paths.managed_shortcuts_dir,
+                )
+            except AppxShortcutError:
+                return None
+            target_type = "shortcut"
+        else:
+            target_path = Path(target.path)
+            target_type = target.target_type
+        mapping = self._find_existing_mapping(target_path, target.key)
+        if mapping:
+            return mapping
+        original_icon = target.original_icon or target.current_icon
+        if target_type == "folder" and not original_icon:
+            original_icon = read_folder_icon(target_path)
+        return self.store.add_mapping(
+            program_name=target.name,
+            program_group=item.program_group or target.group,
+            shortcut_path=str(target_path),
+            icon_group=self._group_for_ico(generated),
+            source_icon=self._source_for_ico(generated),
+            ico_path=str(generated),
+            png_path=str(self._png_for_ico(generated) or ""),
+            auto_reapply=True,
+            target_type=target_type,
+            known_key=target.key,
+            original_icon=original_icon,
+            preferred_asset="ico",
+        )
 
     def _match_theme_target(
         self,

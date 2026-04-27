@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from src.theme_manager import ThemeImportError, delete_theme, import_theme
+from src.theme_manager import ThemeImportError, delete_theme, import_theme, load_manual_associations, save_manual_association
 
 
 class ThemeManagerTests(unittest.TestCase):
@@ -44,6 +44,8 @@ class ThemeManagerTests(unittest.TestCase):
             self.assertTrue((icons_in / "themes" / "Blue Work" / "Media" / "spotify.png").exists())
             self.assertEqual(result.associations[0].program_name, "Spotify")
             self.assertEqual(result.associations[0].program_group, "Comunicacao")
+            self.assertEqual(result.items[0].program_name, "Spotify")
+            self.assertEqual(result.items[0].icon_path, result.png_paths[0])
 
     def test_import_theme_zip_rejects_zip_slip_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -65,6 +67,18 @@ class ThemeManagerTests(unittest.TestCase):
 
             self.assertEqual(deleted, theme_dir)
             self.assertFalse(theme_dir.exists())
+
+    def test_manual_association_is_saved_inside_imported_theme_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            theme_dir = Path(tmp) / "icons-in" / "themes" / "Demo"
+            icon = theme_dir / "Media" / "spotify.png"
+            icon.parent.mkdir(parents=True)
+            icon.write_bytes(b"png")
+
+            save_manual_association(theme_dir, icon, "shortcut:C:/Demo.lnk")
+
+            self.assertEqual(load_manual_associations(theme_dir), {"Media/spotify.png": "shortcut:C:/Demo.lnk"})
+            self.assertTrue((theme_dir / ".lab-icons-theme-associations.json").exists())
 
 
 if __name__ == "__main__":

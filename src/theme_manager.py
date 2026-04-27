@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 MAX_THEME_FILES = 512
 MAX_THEME_BYTES = 200 * 1024 * 1024
 MANIFEST_NAMES = ("theme.json", "config.json", "manifest.json")
+ASSOCIATIONS_FILE = ".lab-icons-theme-associations.json"
 
 
 class ThemeImportError(RuntimeError):
@@ -28,10 +29,20 @@ class ThemeAssociation:
 
 
 @dataclass(frozen=True)
+class ThemeIconItem:
+    icon_path: Path
+    program_name: str = ""
+    program_group: str = ""
+    target_type: str = "shortcut"
+    target_path: str = ""
+
+
+@dataclass(frozen=True)
 class ThemeImportResult:
     theme_name: str
     theme_dir: Path
     png_paths: list[Path]
+    items: list[ThemeIconItem]
     associations: list[ThemeAssociation]
 
 
@@ -57,6 +68,35 @@ def delete_theme(theme_name: str, icons_in_dir: Path) -> Path:
     if theme_dir.exists():
         shutil.rmtree(theme_dir)
     return theme_dir
+
+
+def load_manual_associations(theme_dir: Path) -> dict[str, str]:
+    path = theme_dir / ASSOCIATIONS_FILE
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    items = data.get("items", {})
+    if not isinstance(items, dict):
+        return {}
+    return {str(key): str(value) for key, value in items.items() if value}
+
+
+def save_manual_association(theme_dir: Path, icon_path: Path, target_key: str) -> None:
+    theme_dir.mkdir(parents=True, exist_ok=True)
+    existing = load_manual_associations(theme_dir)
+    existing[_association_icon_key(theme_dir, icon_path)] = target_key
+    payload = {"version": 1, "items": existing}
+    (theme_dir / ASSOCIATIONS_FILE).write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _association_icon_key(theme_dir: Path, icon_path: Path) -> str:
+    try:
+        return str(icon_path.relative_to(theme_dir)).replace("\\", "/")
+    except ValueError:
+        return icon_path.name
 
 
 def _extract_zip(source: Path, destination: Path) -> None:
@@ -93,6 +133,7 @@ def _import_from_staging(staging: Path, icons_in_dir: Path) -> ThemeImportResult
     theme_dir.mkdir(parents=True, exist_ok=True)
 
     copied: list[Path] = []
+    items_out: list[ThemeIconItem] = []
     associations: list[ThemeAssociation] = []
     icons = manifest.get("icons", [])
     if not isinstance(icons, list):
@@ -114,20 +155,38 @@ def _import_from_staging(staging: Path, icons_in_dir: Path) -> ThemeImportResult
         shutil.copy2(source_png, target)
         copied.append(target)
         program_name = str(item.get("program") or item.get("program_name") or item.get("app") or "").strip()
+        program_group = str(item.get("program_group") or item.get("category") or group)
+        target_type = _normalize_target_type(str(item.get("target_type") or item.get("kind") or "shortcut"))
+        target_path = str(item.get("target_path") or item.get("path") or "")
+        items_out.append(
+            ThemeIconItem(
+                icon_path=target,
+                program_name=program_name,
+                program_group=program_group,
+                target_type=target_type,
+                target_path=target_path,
+            )
+        )
         if program_name:
             associations.append(
                 ThemeAssociation(
                     program_name=program_name,
                     icon_path=target,
-                    program_group=str(item.get("program_group") or item.get("category") or group),
-                    target_type=_normalize_target_type(str(item.get("target_type") or item.get("kind") or "shortcut")),
-                    target_path=str(item.get("target_path") or item.get("path") or ""),
+                    program_group=program_group,
+                    target_type=target_type,
+                    target_path=target_path,
                 )
             )
 
     if not copied:
         raise ThemeImportError("Nenhum PNG valido foi encontrado no manifesto do tema.")
-    return ThemeImportResult(theme_name=theme_name, theme_dir=theme_dir, png_paths=copied, associations=associations)
+    return ThemeImportResult(
+        theme_name=theme_name,
+        theme_dir=theme_dir,
+        png_paths=copied,
+        items=items_out,
+        associations=associations,
+    )
 
 
 def _find_manifest(staging: Path) -> Path:
