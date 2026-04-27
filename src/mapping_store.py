@@ -23,6 +23,7 @@ class AppMapping:
     original_icon: str = ""
     is_customized: bool = False
     known_key: str = ""
+    theme_name: str = ""
 
 
 class MappingStore:
@@ -31,8 +32,8 @@ class MappingStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.settings = {
             "auto_check_seconds": 60,
-            "global_auto_reapply": False,
-            "startup_reapply_enabled": False,
+            "global_auto_reapply": True,
+            "startup_reapply_enabled": True,
         }
         self.mappings: list[AppMapping] = []
         self._last_saved_serialized: str | None = None
@@ -79,6 +80,7 @@ class MappingStore:
         original_icon: str = "",
         is_customized: bool = False,
         known_key: str = "",
+        theme_name: str = "",
     ) -> AppMapping:
         mapping = AppMapping(
             id=str(uuid.uuid4()),
@@ -95,6 +97,7 @@ class MappingStore:
             original_icon=original_icon,
             is_customized=is_customized,
             known_key=known_key,
+            theme_name=theme_name,
         )
         self.mappings.append(mapping)
         self.save()
@@ -120,6 +123,7 @@ class MappingStore:
         normalized.setdefault("original_icon", "")
         normalized.setdefault("is_customized", bool(normalized.get("auto_reapply")))
         normalized.setdefault("known_key", "")
+        normalized.setdefault("theme_name", "")
         return normalized
 
     def _load_json(self) -> dict:

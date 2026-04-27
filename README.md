@@ -2,7 +2,7 @@
 
 Gerenciador local para importar icones PNG, gerar ICOs compativeis com Windows e aplicar customizacoes em atalhos e pastas com uma interface visual simples.
 
-O projeto prioriza seguranca: ele nao modifica executaveis, DLLs, arquivos do sistema ou registro do Windows. As alteracoes sao feitas em atalhos `.lnk` selecionados pelo usuario e em pastas escolhidas pelo usuario usando `desktop.ini`.
+O projeto prioriza seguranca: ele nao modifica executaveis, DLLs, arquivos `.mun`, arquivos do sistema ou registro do Windows. As alteracoes sao feitas em atalhos `.lnk` selecionados pelo usuario e em pastas escolhidas pelo usuario usando `desktop.ini`, preservando os binarios originais e evitando quebra de assinaturas digitais.
 
 ## Features e Como Funciona
 
@@ -21,16 +21,20 @@ O projeto prioriza seguranca: ele nao modifica executaveis, DLLs, arquivos do si
 - Remove fundo branco conectado as bordas quando detectado.
 - Suaviza marcas visuais simples nos cantos.
 - Gera ICOs grandes e compativeis com Windows: 16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 128 e 256 px.
+- Mantem canal alfa RGBA para transparencia graduada, bordas suavizadas e sombras.
+- Inclui tamanhos pequenos dedicados em vez de depender apenas do redimensionamento automatico de 256 px para 16/24/32 px.
 - Mantem tambem um PNG limpo em `icons-out/png/` em 1024 px para preview e usos futuros.
 
 ### Aplicacao em apps e pastas
 
-- Atalhos usam alteracao segura do proprio `.lnk`.
+- Atalhos usam alteracao segura do proprio `.lnk` via COM/`IShellLink`, sem editar o aplicativo de destino.
 - Pastas usam `desktop.ini`, mecanismo padrao do Windows para icones de pasta.
 - O app preserva metadados de pastas especiais, como Music, Documents e Pictures.
 - Ao aplicar icone em pasta, o ICO e copiado para `.lab-icons-windows/` dentro da propria pasta.
 - O arquivo aplicado recebe hash no nome para evitar que o Explorer reutilize cache antigo de icone.
 - O app le `desktop.ini` em UTF-16/UTF-8, entende `IconFile`, `IconResource`, caminhos relativos e indice do icone.
+- A pasta recebe atributos `System` e `Read-only`, requisito do Shell para processar `desktop.ini`.
+- O `desktop.ini` aplicado usa `IconResource=...,0` e tambem grava `IconFile`/`IconIndex` para compatibilidade.
 - O painel central mostra original e atual/customizado.
 - **Salvar e aplicar** grava o mapeamento e aplica o icone em uma unica acao.
 
@@ -46,6 +50,8 @@ O app lista:
 Os itens sao agrupados por temas como Browsers, Dev, Editores, Office, Design, Media, Games, Comunicacao, Seguranca, VPN, Sistema Windows, Pastas do usuario, Trabalho e Pessoal.
 
 Apps modernos do Windows nem sempre expoem um `.lnk` editavel. Para esses casos, o app cria um atalho gerenciado em `config/managed-shortcuts/` apontando para `shell:AppsFolder\...` e aplica o icone nesse atalho.
+
+O app nao altera manifestos `AppxManifest.xml` de apps UWP/Store instalados. Essa escolha segue a rota menos invasiva: criar um atalho secundario editavel e alterar o icone desse atalho.
 
 ### Reaplicacao automatica
 
@@ -66,10 +72,31 @@ A opcao global cria um atalho na pasta Startup do usuario. Ao iniciar o Windows,
 - A descoberta de atalhos e pastas evita `Path.resolve()` ao montar chaves internas, usando caminho absoluto normalizado do Windows para reduzir IO extra durante startup e na criacao manual de mapeamentos.
 - A aplicacao de icones em atalhos e pastas agora calcula o nome versionado do ICO com hash em streaming, evitando carregar o arquivo inteiro na memoria a cada reaplicacao.
 - Previews extraidos de `.lnk`, `.exe` e outros arquivos do Windows passam a invalidar o cache automaticamente quando o arquivo de origem muda, evitando miniaturas antigas apos updates de apps ou troca de icone.
-- A extracao de previews nativos do Windows libera `HICON` e `DC` logo apos o uso, evitando acumulo de handles em refreshes repetidos da lista e da galeria.
+- A extracao de previews nativos tenta `PrivateExtractIconsW` em 256 px primeiro, o que melhora fidelidade para bibliotecas modernas, executaveis, DLLs e arquivos `.mun` lidos como PE quando o Windows permite; se falhar, usa `ExtractIconEx` e depois `SHGetFileInfo`.
+- A extracao libera `HICON` e `DC` logo apos o uso, evitando acumulo de handles em refreshes repetidos da lista e da galeria.
 - O cache em memoria das miniaturas da UI agora e limitado e substitui entradas antigas do mesmo arquivo quando o preview muda, evitando crescimento continuo de RAM em sessoes longas com muitas atualizacoes de icones.
-- Logs de performance sao gravados em `config/performance.log`.
+- Logs de performance sao gravados em `config/performance.log`; se existir um placeholder UTF-16 herdado de redacao local, o app o normaliza uma vez para manter o arquivo legivel como JSON Lines UTF-8.
 - O comando `python app.py --perf-smoke` mede o carregamento da janela sem abrir o app para uso normal.
+
+## Conformidade com Iconografia do Windows
+
+Este projeto implementa apenas os mecanismos seguros para customizacao por usuario:
+
+- **ICO multiescala:** os arquivos gerados incluem representacoes de 16 a 256 px, com alfa RGBA para transparencia moderna.
+- **Pastas:** usa `desktop.ini` em UTF-16, grava `IconResource`, preserva metadados existentes, faz backup do arquivo original e aplica atributos exigidos pelo Explorer.
+- **Atalhos:** usa a interface COM de atalhos do Windows para `SetIconLocation`, mantendo o alvo original intacto.
+- **Apps UWP/Store:** usa atalhos gerenciados para `shell:AppsFolder\AppID`, sem editar manifesto AppX nem assets instalados pelo pacote.
+- **Atualizacao do Shell:** usa `SHChangeNotify` com eventos especificos de item/pasta para reduzir impacto no Explorer.
+- **Reversibilidade:** guarda o icone original no mapeamento e mantem copias versionadas por hash para evitar cache antigo.
+
+Fora de escopo por seguranca:
+
+- Editar recursos internos de `.exe`, `.dll` ou `.mun`.
+- Alterar `HKLM`, `HKCU\Software\Classes`, `DefaultIcon`, CLSIDs do sistema ou associacoes globais de arquivo.
+- Substituir assets de aplicativos UWP instalados.
+- Limpar agressivamente `IconCache.db` ou reiniciar `explorer.exe` automaticamente.
+
+Essas operacoes continuam tecnicamente possiveis no Windows, mas exigem privilegios, afetam todo o sistema ou podem quebrar assinaturas digitais. Para este app, a abordagem correta e preferir `.lnk` e `desktop.ini`.
 
 ## Estrutura
 
@@ -160,6 +187,7 @@ O app:
 - Nao roda como administrador.
 - Nao instala servico em background.
 - Nao altera o registro do Windows para trocar icones de apps.
+- Nao edita EXE, DLL, MUN ou manifestos AppX.
 - Preserva e faz backup do `desktop.ini` quando customiza pastas.
 
 Alteracoes de `DefaultIcon` no registro sao adequadas para associacoes de arquivos ou instaladores. Para este app, a rota segura e `.lnk` para atalhos e `desktop.ini` para pastas.

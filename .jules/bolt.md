@@ -33,3 +33,7 @@
 ## 2026-04-27 - Streamed applied ICO hashing
 **Learning:** Applying shortcut and folder icons was loading each ICO fully into memory just to derive the versioned filename used for Explorer cache-busting.
 **Action:** Keep future digest-based icon naming on streamed file reads so repeated applies stay content-based without avoidable memory spikes.
+
+## 2026-04-27 - Normalized legacy performance log encoding
+**Learning:** `config/performance.log` could become mixed-encoding on Windows when a UTF-16 redaction placeholder was left in place and runtime JSON lines were appended as UTF-8.
+**Action:** Keep diagnostic logs normalized to one encoding at startup whenever local placeholder files or legacy mixed headers can appear.

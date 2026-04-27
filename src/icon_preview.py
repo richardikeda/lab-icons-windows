@@ -52,6 +52,11 @@ def _parse_icon_location(icon_location: str) -> tuple[str, int]:
 
 
 def _extract_windows_icon(path: Path, icon_index: int) -> Image.Image:
+    try:
+        return _extract_private_icon(path, icon_index, 256)
+    except Exception:
+        pass
+
     import win32con
     import win32gui
     import win32ui
@@ -80,6 +85,29 @@ def _extract_windows_icon(path: Path, icon_index: int) -> Image.Image:
         win32gui.ReleaseDC(0, screen_dc)
 
 
+def _extract_private_icon(path: Path, icon_index: int, size: int) -> Image.Image:
+    import ctypes
+
+    hicon = ctypes.c_void_p()
+    icon_id = ctypes.c_uint()
+    extracted = ctypes.windll.user32.PrivateExtractIconsW(
+        ctypes.c_wchar_p(str(path)),
+        ctypes.c_int(icon_index),
+        ctypes.c_int(size),
+        ctypes.c_int(size),
+        ctypes.byref(hicon),
+        ctypes.byref(icon_id),
+        ctypes.c_uint(1),
+        ctypes.c_uint(0),
+    )
+    if extracted == 0 or not hicon.value:
+        raise ValueError("No icon found")
+    try:
+        return _hicon_to_image(int(hicon.value), size)
+    finally:
+        ctypes.windll.user32.DestroyIcon(hicon)
+
+
 def _extract_shell_icon(path: Path) -> Image.Image:
     import win32con
     import win32gui
@@ -103,6 +131,28 @@ def _extract_shell_icon(path: Path) -> Image.Image:
         return Image.frombuffer("RGBA", (width, height), bits, "raw", "BGRA", 0, 1)
     finally:
         win32gui.DestroyIcon(hicon)
+        memdc.DeleteDC()
+        hdc.DeleteDC()
+        win32gui.ReleaseDC(0, screen_dc)
+
+
+def _hicon_to_image(hicon: int, size: int) -> Image.Image:
+    import win32con
+    import win32gui
+    import win32ui
+
+    screen_dc = win32gui.GetDC(0)
+    hdc = win32ui.CreateDCFromHandle(screen_dc)
+    memdc = hdc.CreateCompatibleDC()
+    bitmap = win32ui.CreateBitmap()
+    try:
+        bitmap.CreateCompatibleBitmap(hdc, size, size)
+        memdc.SelectObject(bitmap)
+        memdc.FillSolidRect((0, 0, size, size), win32gui.RGB(0, 0, 0))
+        win32gui.DrawIconEx(memdc.GetSafeHdc(), 0, 0, hicon, size, size, 0, None, win32con.DI_NORMAL)
+        bits = bitmap.GetBitmapBits(True)
+        return Image.frombuffer("RGBA", (size, size), bits, "raw", "BGRA", 0, 1)
+    finally:
         memdc.DeleteDC()
         hdc.DeleteDC()
         win32gui.ReleaseDC(0, screen_dc)

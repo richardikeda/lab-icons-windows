@@ -5,11 +5,12 @@ import queue
 import threading
 import time
 import hashlib
+import json
 from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 
 import customtkinter as ctk
 from PIL import Image
@@ -35,6 +36,7 @@ from src.perf_logger import PerfLogger
 from src.reapply_service import apply_mapping, capture_original_icon, reapply_changed, restore_mapping
 from src.shortcut_manager import ShortcutError
 from src.startup_manager import StartupError, disable_startup_reapply, enable_startup_reapply, is_startup_reapply_enabled
+from src.theme_manager import ThemeImportError, delete_theme, import_theme
 from src.windows_native import apply_native_window_style
 
 
@@ -183,6 +185,7 @@ class IconMapperApp(ctk.CTk):
             self.refresh_mapping_list()
         self.refresh_discovered_async()
         self._sync_global_settings()
+        self._ensure_startup_reapply()
         self.after(80, lambda: apply_native_window_style(self))
         self.after(2000, self._poll_icon_folder)
 
@@ -308,14 +311,24 @@ class IconMapperApp(ctk.CTk):
         self.global_auto.grid(row=0, column=0, padx=(24, 8), pady=6, sticky="w")
         ctk.CTkButton(
             topbar,
-            text="Config",
-            width=36,
+            text="Salvar boot",
+            width=76,
             height=28,
             fg_color="transparent",
             hover_color="#34486e",
             text_color="#cbd5e1",
             command=self.save_global_settings,
-        ).grid(row=0, column=2, padx=18, pady=3, sticky="e")
+        ).grid(row=0, column=2, padx=(0, 8), pady=3, sticky="e")
+        ctk.CTkButton(
+            topbar,
+            text="Ver config",
+            width=76,
+            height=28,
+            fg_color="transparent",
+            hover_color="#34486e",
+            text_color="#cbd5e1",
+            command=self.view_config_file,
+        ).grid(row=0, column=3, padx=(0, 18), pady=3, sticky="e")
 
         self.status_label = ctk.CTkLabel(panel, text="Pronto.", anchor="w", text_color="#aab7cc", font=ctk.CTkFont(size=12))
         self.status_label.grid(row=1, column=0, padx=32, pady=(12, 0), sticky="ew")
@@ -470,7 +483,7 @@ class IconMapperApp(ctk.CTk):
 
         bulk = ctk.CTkFrame(form, fg_color="transparent")
         bulk.grid(row=6, column=0, columnspan=4, sticky="ew")
-        bulk.grid_columnconfigure((0, 1), weight=1)
+        bulk.grid_columnconfigure((0, 1, 2, 3), weight=1)
         ctk.CTkButton(
             bulk,
             text="Carregar grupo de icones",
@@ -483,6 +496,26 @@ class IconMapperApp(ctk.CTk):
         ).grid(row=0, column=0, padx=(0, 8), sticky="ew")
         ctk.CTkButton(
             bulk,
+            text="Importar tema",
+            height=36,
+            fg_color="#34476b",
+            hover_color="#40577f",
+            text_color="#e5edf8",
+            corner_radius=12,
+            command=self.import_theme_package,
+        ).grid(row=0, column=1, padx=(0, 8), sticky="ew")
+        ctk.CTkButton(
+            bulk,
+            text="Excluir tema",
+            height=36,
+            fg_color="#34476b",
+            hover_color="#40577f",
+            text_color="#e5edf8",
+            corner_radius=12,
+            command=self.delete_theme_package,
+        ).grid(row=0, column=2, padx=(0, 8), sticky="ew")
+        ctk.CTkButton(
+            bulk,
             text="Remover todos customizados",
             height=36,
             fg_color="#5f2430",
@@ -490,7 +523,7 @@ class IconMapperApp(ctk.CTk):
             text_color="#fee2e2",
             corner_radius=12,
             command=self.remove_all_customized,
-        ).grid(row=0, column=1, padx=(8, 0), sticky="ew")
+        ).grid(row=0, column=3, sticky="ew")
 
         ctk.CTkLabel(
             form,
@@ -950,6 +983,7 @@ class IconMapperApp(ctk.CTk):
         self.selected_mapping.png_path = str(self.selected_png or "")
         self.selected_mapping.source_icon = self._source_for_ico(self.selected_icon)
         self.selected_mapping.preferred_asset = "png" if self.asset_choice.get() == "PNG limpo" else "ico"
+        self.selected_mapping.auto_reapply = True
         self.store.update_mapping(self.selected_mapping)
         self.refresh_mapping_list()
         self.refresh_discovered_list()
@@ -967,6 +1001,7 @@ class IconMapperApp(ctk.CTk):
             messagebox.showerror("Nao foi possivel aplicar", str(exc))
             return
         self.selected_mapping.is_customized = True
+        self.selected_mapping.auto_reapply = True
         self.store.update_mapping(self.selected_mapping)
         self._refresh_previews(self.selected_mapping)
         self.refresh_mapping_list()
@@ -994,6 +1029,164 @@ class IconMapperApp(ctk.CTk):
             return
         self.store.save()
         self.set_status("Configuracao global salva.")
+
+    def _ensure_startup_reapply(self) -> None:
+        if not self.store.settings.get("startup_reapply_enabled", True):
+            return
+        try:
+            enable_startup_reapply(self.base_dir / "app.py")
+        except StartupError as exc:
+            self.store.settings["startup_reapply_enabled"] = False
+            self.store.save()
+            self.set_status(f"Reaplicacao no boot desativada: {exc}")
+
+    def view_config_file(self) -> None:
+        self.store.save()
+        try:
+            content = self.store.path.read_text(encoding="utf-8")
+            parsed = json.loads(content)
+            content = json.dumps(parsed, indent=2, ensure_ascii=False)
+        except Exception:
+            content = self.store.path.read_text(encoding="utf-8", errors="replace")
+
+        window = ctk.CTkToplevel(self)
+        window.title("mappings.json")
+        window.geometry("900x640")
+        window.grid_columnconfigure(0, weight=1)
+        window.grid_rowconfigure(1, weight=1)
+        ctk.CTkLabel(
+            window,
+            text=str(self.store.path),
+            anchor="w",
+            text_color="#cbd5e1",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).grid(row=0, column=0, padx=16, pady=(14, 8), sticky="ew")
+        text = ctk.CTkTextbox(window, fg_color="#111827", text_color="#e5edf8", wrap="none")
+        text.grid(row=1, column=0, padx=16, pady=(0, 16), sticky="nsew")
+        text.insert("1.0", content)
+        text.configure(state="disabled")
+
+    def import_theme_package(self) -> None:
+        choice = messagebox.askyesno("Importar tema", "Importar de ZIP?\n\nEscolha 'Nao' para selecionar uma pasta.")
+        if choice:
+            source = filedialog.askopenfilename(title="Selecione o ZIP do tema", filetypes=[("Temas ZIP", "*.zip")])
+        else:
+            source = filedialog.askdirectory(title="Selecione a pasta do tema")
+        if not source:
+            return
+        started = time.perf_counter()
+        try:
+            result = import_theme(Path(source), self.input_dir)
+        except ThemeImportError as exc:
+            messagebox.showerror("Importar tema", str(exc))
+            return
+        self.refresh_icons()
+        created = self._create_theme_mappings(result.theme_name, result.associations)
+        self.perf.log("themes.import", (time.perf_counter() - started) * 1000, items=len(result.png_paths), mappings=created)
+        self.set_status(f"Tema '{result.theme_name}' importado: {len(result.png_paths)} PNG(s), {created} associacao(oes).")
+
+    def delete_theme_package(self) -> None:
+        theme = simpledialog.askstring("Excluir tema", "Nome do tema importado:")
+        if not theme:
+            return
+        if not messagebox.askyesno("Excluir tema", f"Excluir arquivos do tema '{theme}' e seus mapeamentos?"):
+            return
+        try:
+            delete_theme(theme, self.input_dir)
+        except ThemeImportError as exc:
+            messagebox.showerror("Excluir tema", str(exc))
+            return
+        kept = []
+        errors = 0
+        for mapping in self.store.mappings:
+            if mapping.theme_name.casefold() != theme.casefold():
+                kept.append(mapping)
+                continue
+            if mapping.is_customized:
+                try:
+                    restore_mapping(mapping)
+                except (ShortcutError, FolderIconError):
+                    errors += 1
+        self.store.mappings = kept
+        self.store.save()
+        self.refresh_icons()
+        self.refresh_mapping_list()
+        self.set_status(f"Tema '{theme}' excluido. Erros ao restaurar: {errors}.")
+
+    def _create_theme_mappings(self, theme_name: str, associations: object) -> int:
+        created = 0
+        targets = {target.key: target for target in self.discovered_targets}
+        for association in associations:
+            generated = output_path_for(self.input_dir, self.output_dir, association.icon_path)
+            if self._needs_processing(association.icon_path, generated):
+                try:
+                    process_icon(self.input_dir, self.output_dir, association.icon_path)
+                except Exception:
+                    continue
+            target = self._match_theme_target(association.program_name, association.target_path, association.target_type, targets)
+            if not target:
+                continue
+            if target.target_type == "appx":
+                try:
+                    target_path = create_managed_appx_shortcut(
+                        target.path,
+                        target.name,
+                        self.base_dir / "config" / "managed-shortcuts",
+                    )
+                except AppxShortcutError:
+                    continue
+                target_type = "shortcut"
+            else:
+                target_path = Path(target.path)
+                target_type = target.target_type
+            mapping = self._find_existing_mapping(target_path, target.key)
+            if not mapping:
+                self._create_mapping(
+                    target_path,
+                    target_type,
+                    group=association.program_group or target.group,
+                    known_key=target.key,
+                    display_name=target.name,
+                    original_icon=target.original_icon or target.current_icon,
+                )
+                mapping = self.selected_mapping
+            if not mapping:
+                continue
+            mapping.ico_path = str(generated)
+            mapping.png_path = str(png_output_path_for(self.input_dir, self.output_dir, association.icon_path))
+            mapping.source_icon = str(association.icon_path)
+            mapping.icon_group = icon_group_for(self.input_dir, association.icon_path)
+            mapping.program_group = association.program_group or mapping.program_group
+            mapping.theme_name = theme_name
+            mapping.auto_reapply = True
+            self.store.update_mapping(mapping)
+            created += 1
+        self.refresh_mapping_list()
+        self.refresh_discovered_list()
+        return created
+
+    def _match_theme_target(
+        self,
+        program_name: str,
+        target_path: str,
+        target_type: str,
+        targets: dict[str, DiscoveredTarget],
+    ) -> DiscoveredTarget | None:
+        if target_path:
+            normalized = normalized_target_key(Path(target_path))
+            return next((target for target in targets.values() if normalized_target_key(Path(target.path)) == normalized), None)
+        terms = program_name.casefold().split()
+        if not terms:
+            return None
+        return next(
+            (
+                target
+                for target in targets.values()
+                if target.target_type == target_type or target_type == "shortcut"
+                if all(term in target.name.casefold() for term in terms)
+            ),
+            None,
+        )
 
     def remove_selected(self) -> None:
         if not self.selected_mapping:
