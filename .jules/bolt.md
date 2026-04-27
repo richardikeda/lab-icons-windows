@@ -37,3 +37,7 @@
 ## 2026-04-27 - Normalized legacy performance log encoding
 **Learning:** `config/performance.log` could become mixed-encoding on Windows when a UTF-16 redaction placeholder was left in place and runtime JSON lines were appended as UTF-8.
 **Action:** Keep diagnostic logs normalized to one encoding at startup whenever local placeholder files or legacy mixed headers can appear.
+
+## 2026-04-27 - Skipped unchanged batch icon work
+**Learning:** The background package processor was re-encoding every PNG on every run even when both the generated `.ico` and cleaned preview `.png` were already newer than the source asset.
+**Action:** Keep future bulk icon work gated by shared output-freshness checks so Windows batch actions skip unchanged files before starting worker threads.

@@ -26,6 +26,7 @@ from src.icon_pipeline import (
     output_path_for,
     png_output_path_for,
     process_icon,
+    processed_outputs_current,
     remove_edge_white_background,
     snapshot_pngs,
     soften_corner_marks,
@@ -786,10 +787,15 @@ class IconMapperApp(ctk.CTk):
 
     def _process_worker(self, pngs: list[Path]) -> None:
         started = time.perf_counter()
-        workers = min(4, max(1, (os.cpu_count() or 2) - 1), len(pngs))
+        pending = [png for png in pngs if not processed_outputs_current(self.input_dir, self.output_dir, png)]
+        if not pending:
+            self.perf.log("icons.process_batch", (time.perf_counter() - started) * 1000, items=0, skipped=len(pngs), workers=0)
+            self.process_queue.put(("finished", 0))
+            return
+        workers = min(4, max(1, (os.cpu_count() or 2) - 1), len(pending))
         done = 0
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(process_icon, self.input_dir, self.output_dir, png): png for png in pngs}
+            futures = {executor.submit(process_icon, self.input_dir, self.output_dir, png): png for png in pending}
             for future in as_completed(futures):
                 png_path = futures[future]
                 try:
@@ -801,8 +807,14 @@ class IconMapperApp(ctk.CTk):
                 done += 1
                 if done % 8 == 0:
                     self.process_queue.put(("progress", done))
-        self.perf.log("icons.process_batch", (time.perf_counter() - started) * 1000, items=len(pngs), workers=workers)
-        self.process_queue.put(("finished", len(pngs)))
+        self.perf.log(
+            "icons.process_batch",
+            (time.perf_counter() - started) * 1000,
+            items=len(pending),
+            skipped=len(pngs) - len(pending),
+            workers=workers,
+        )
+        self.process_queue.put(("finished", len(pending)))
 
     def _drain_process_queue(self) -> None:
         events = 0
@@ -1461,9 +1473,7 @@ class IconMapperApp(ctk.CTk):
         return self._group_for_ico(path)
 
     def _needs_processing(self, source: Path, generated: Path) -> bool:
-        if not generated.exists():
-            return True
-        return source.stat().st_mtime > generated.stat().st_mtime
+        return not processed_outputs_current(self.input_dir, self.output_dir, source)
 
     def _find_existing_mapping(self, target: Path, known_key: str) -> AppMapping | None:
         normalized = normalized_target_key(target)

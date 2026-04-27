@@ -107,6 +107,21 @@ def process_icon(
     )
 
 
+def processed_outputs_current(input_dir: Path, output_dir: Path, png_path: Path) -> bool:
+    ico_path = output_path_for(input_dir, output_dir, png_path)
+    png_output_path = png_output_path_for(input_dir, output_dir, png_path)
+    try:
+        source_mtime = png_path.stat().st_mtime_ns
+        return (
+            ico_path.exists()
+            and png_output_path.exists()
+            and source_mtime <= ico_path.stat().st_mtime_ns
+            and source_mtime <= png_output_path.stat().st_mtime_ns
+        )
+    except OSError:
+        return False
+
+
 def remove_edge_white_background(image: Image.Image, threshold: int = 245) -> Image.Image:
     rgba = image.convert("RGBA")
     if not _has_near_white_border(rgba, threshold):

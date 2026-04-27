@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import queue
 import tempfile
+import time
 import unittest
 from collections import OrderedDict
 from pathlib import Path
@@ -12,10 +14,11 @@ from src.app_discovery import _discover_shortcuts, _group_for_name
 from src.folder_manager import _managed_icon_name, _merge_desktop_ini, read_folder_icon
 import src.folder_manager as folder_manager
 import src.icon_pipeline as icon_pipeline
-from src.icon_pipeline import discover_png_entries, output_path_for, process_icon, snapshot_pngs
+from src.icon_pipeline import discover_png_entries, output_path_for, process_icon, processed_outputs_current, snapshot_pngs
 from src.mapping_store import MappingStore
 import src.reapply_service as reapply_service
 from src.shortcut_manager import _file_digest
+from src.ui import IconMapperApp
 from src.ui import build_gallery_entries, discover_gallery_icons, remember_icon_image
 
 
@@ -76,6 +79,36 @@ class IconPipelineTests(unittest.TestCase):
                 )
 
             self.assertEqual(fit_square.call_count, 1)
+
+    def test_processed_outputs_current_requires_fresh_ico_and_clean_png(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            input_dir = base / "icons-in"
+            output_dir = base / "icons-out"
+            source = input_dir / "social" / "whatsapp.png"
+            source.parent.mkdir(parents=True)
+            Image.new("RGBA", (32, 32), (0, 180, 90, 255)).save(source)
+
+            process_icon(input_dir, output_dir, source)
+            self.assertTrue(processed_outputs_current(input_dir, output_dir, source))
+
+            (output_dir / "png" / "social" / "whatsapp.png").unlink()
+            self.assertFalse(processed_outputs_current(input_dir, output_dir, source))
+
+    def test_processed_outputs_current_detects_newer_source_than_generated_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            input_dir = base / "icons-in"
+            output_dir = base / "icons-out"
+            source = input_dir / "social" / "whatsapp.png"
+            source.parent.mkdir(parents=True)
+            Image.new("RGBA", (32, 32), (0, 180, 90, 255)).save(source)
+
+            process_icon(input_dir, output_dir, source)
+            time.sleep(0.02)
+            Image.new("RGBA", (32, 32), (255, 80, 80, 255)).save(source)
+
+            self.assertFalse(processed_outputs_current(input_dir, output_dir, source))
 
     def test_discover_gallery_icons_skips_output_scan_when_sources_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -264,6 +297,23 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(len(targets), 1)
             self.assertTrue(targets[0].key.startswith("shortcut:"))
             self.assertEqual(targets[0].path, str(shortcut))
+
+
+class BatchProcessingTests(unittest.TestCase):
+    def test_process_worker_skips_icons_with_current_outputs(self) -> None:
+        app = object.__new__(IconMapperApp)
+        app.input_dir = Path("icons-in")
+        app.output_dir = Path("icons-out")
+        app.process_queue = queue.Queue()
+        app.perf = mock.Mock()
+
+        with mock.patch("src.ui.processed_outputs_current", return_value=True), mock.patch(
+            "src.ui.ThreadPoolExecutor", side_effect=AssertionError("executor should not run")
+        ), mock.patch("src.ui.process_icon", side_effect=AssertionError("process_icon should not run")):
+            app._process_worker([Path("icons-in") / "one.png", Path("icons-in") / "two.png"])
+
+        self.assertEqual(app.process_queue.get_nowait(), ("finished", 0))
+        app.perf.log.assert_called_once()
 
 
 class FolderIniTests(unittest.TestCase):

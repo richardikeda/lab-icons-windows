@@ -107,6 +107,7 @@ Por padrao, novas customizacoes ficam com reaplicacao ligada. O arquivo `config/
 - Quando `icons-in/` ja contem PNGs, a tela pula a varredura recursiva de `icons-out/ico/`; o fallback para ICOs so roda quando a biblioteca de origem esta vazia.
 - A galeria precomputa grupo, caminho relativo e estado pronto/novo de cada item durante `refresh_icons()`, evitando repetir essas derivacoes e `stat()` a cada rerender e durante a digitacao no filtro.
 - A geracao de cada icone reutiliza a mesma base quadrada para PNG e ICO, cortando uma etapa de preparo por arquivo e reduzindo CPU em lotes maiores.
+- O processamento em lote agora pula PNGs cujos `.ico` e previews limpos ja estao atualizados, evitando reencodar toda a biblioteca quando nada mudou.
 - A descoberta de atalhos e pastas evita `Path.resolve()` ao montar chaves internas, usando caminho absoluto normalizado do Windows para reduzir IO extra durante startup e na criacao manual de mapeamentos.
 - A aplicacao de icones em atalhos e pastas agora calcula o nome versionado do ICO com hash em streaming, evitando carregar o arquivo inteiro na memoria a cada reaplicacao.
 - Previews extraidos de `.lnk`, `.exe` e outros arquivos do Windows passam a invalidar o cache automaticamente quando o arquivo de origem muda, evitando miniaturas antigas apos updates de apps ou troca de icone.
