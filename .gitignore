@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+tmp-smoke/
+config/test-mappings.json
+config/mappings.json
+config/icon-cache/
+config/managed-shortcuts/
+build/
+dist/
+*.spec

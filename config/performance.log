@@ -1,0 +1,20 @@
+{"session": "20260427-005123", "event": "ui.build_layout", "elapsed_ms": 142.57}
+{"session": "20260427-005123", "event": "ui.refresh_icon_gallery", "elapsed_ms": 234.48, "items": 11}
+{"session": "20260427-005123", "event": "ui.refresh_icons", "elapsed_ms": 240.49}
+{"session": "20260427-005123", "event": "ui.refresh_mapping_list", "elapsed_ms": 66.43}
+{"session": "20260427-005123", "event": "app.perf_smoke", "elapsed_ms": 1650.67}
+{"session": "20260427-005123", "event": "discovery.targets", "elapsed_ms": 1209.52, "items": 354}
+{"session": "20260427-005330", "event": "ui.build_layout", "elapsed_ms": 162.92}
+{"session": "20260427-005330", "event": "ui.refresh_icon_gallery", "elapsed_ms": 281.49, "items": 11}
+{"session": "20260427-005330", "event": "ui.refresh_icons", "elapsed_ms": 289.66}
+{"session": "20260427-005330", "event": "ui.refresh_mapping_list.render", "elapsed_ms": 50.23, "items": 9}
+{"session": "20260427-005330", "event": "ui.refresh_mapping_list", "elapsed_ms": 50.7}
+{"session": "20260427-005330", "event": "app.perf_smoke", "elapsed_ms": 1682.33}
+{"session": "20260427-005330", "event": "discovery.targets", "elapsed_ms": 1201.56, "items": 354}
+{"session": "20260427-005339", "event": "ui.build_layout", "elapsed_ms": 134.93}
+{"session": "20260427-005339", "event": "ui.refresh_icon_gallery", "elapsed_ms": 130.79, "items": 11}
+{"session": "20260427-005339", "event": "ui.refresh_icons", "elapsed_ms": 136.09}
+{"session": "20260427-005339", "event": "ui.refresh_mapping_list.render", "elapsed_ms": 49.3, "items": 9}
+{"session": "20260427-005339", "event": "ui.refresh_mapping_list", "elapsed_ms": 49.74}
+{"session": "20260427-005339", "event": "app.perf_smoke", "elapsed_ms": 1487.61}
+{"session": "20260427-005339", "event": "discovery.targets", "elapsed_ms": 1226.26, "items": 354}

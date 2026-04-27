@@ -1,0 +1,157 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from PIL import Image
+
+from src.app_discovery import _group_for_name
+from src.folder_manager import _merge_desktop_ini, read_folder_icon
+import src.folder_manager as folder_manager
+from src.icon_pipeline import output_path_for, process_icon
+from src.mapping_store import MappingStore
+import src.reapply_service as reapply_service
+
+
+class IconPipelineTests(unittest.TestCase):
+    def test_process_icon_generates_clean_png_and_ico(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            input_dir = base / "icons-in"
+            output_dir = base / "icons-out"
+            source = input_dir / "social" / "whatsapp.png"
+            source.parent.mkdir(parents=True)
+            image = Image.new("RGBA", (64, 64), (255, 255, 255, 255))
+            for x in range(16, 48):
+                for y in range(16, 48):
+                    image.putpixel((x, y), (0, 180, 90, 255))
+            image.save(source)
+
+            processed = process_icon(input_dir, output_dir, source)
+
+            self.assertTrue(processed.output_path.exists())
+            self.assertTrue(processed.png_output_path.exists())
+            self.assertEqual(processed.output_path, output_path_for(input_dir, output_dir, source))
+            with Image.open(processed.output_path) as ico:
+                self.assertIn((256, 256), ico.ico.sizes())
+
+
+class MappingStoreTests(unittest.TestCase):
+    def test_customized_mapping_persists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mappings.json"
+            store = MappingStore(path)
+            store.add_mapping(
+                program_name="WhatsApp",
+                program_group="Comunicacao",
+                shortcut_path="config/managed-shortcuts/WhatsApp.lnk",
+                icon_group="social",
+                source_icon="icons-in/whatsapp.png",
+                ico_path="icons-out/ico/whatsapp.ico",
+                png_path="icons-out/png/whatsapp.png",
+                auto_reapply=False,
+                target_type="shortcut",
+                is_customized=True,
+                known_key="appx:whatsapp",
+            )
+
+            reloaded = MappingStore(path)
+
+            self.assertEqual(len(reloaded.mappings), 1)
+            self.assertTrue(reloaded.mappings[0].is_customized)
+            self.assertEqual(reloaded.mappings[0].known_key, "appx:whatsapp")
+
+    def test_capture_original_replaces_shortcut_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mapping = MappingStore(Path(tmp) / "unused.json").add_mapping(
+                program_name="Demo",
+                program_group="Dev",
+                shortcut_path="C:/Users/demo/Desktop/Demo.lnk",
+                icon_group="dev",
+                source_icon="",
+                ico_path="icons-out/ico/demo.ico",
+                auto_reapply=False,
+                target_type="shortcut",
+                original_icon="C:/Users/demo/Desktop/Demo.lnk",
+            )
+        original_reader = reapply_service.read_shortcut_icon
+        try:
+            reapply_service.read_shortcut_icon = lambda _: "C:/Program Files/Demo/demo.exe,0"
+            reapply_service.capture_original_icon(mapping)
+        finally:
+            reapply_service.read_shortcut_icon = original_reader
+
+        self.assertEqual(mapping.original_icon, "C:/Program Files/Demo/demo.exe,0")
+
+
+class DiscoveryTests(unittest.TestCase):
+    def test_known_apps_classification(self) -> None:
+        self.assertEqual(_group_for_name("WhatsApp"), "Comunicacao")
+        self.assertEqual(_group_for_name("Google Chrome"), "Browsers")
+        self.assertEqual(_group_for_name("Visual Studio Code"), "Dev")
+        self.assertEqual(_group_for_name("7-Zip Help"), "Pessoal")
+
+
+class FolderIniTests(unittest.TestCase):
+    def test_merge_preserves_music_shell_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "desktop.ini"
+            path.write_text(
+                "\n".join(
+                    [
+                        "[.ShellClassInfo]",
+                        "LocalizedResourceName=@%SystemRoot%\\system32\\shell32.dll,-21790",
+                        "InfoTip=@%SystemRoot%\\system32\\shell32.dll,-12689",
+                        "IconResource=%SystemRoot%\\system32\\imageres.dll,-108",
+                        "IconFile=%SystemRoot%\\system32\\shell32.dll",
+                        "IconIndex=-237",
+                    ]
+                ),
+                encoding="utf-16",
+            )
+
+            merged = _merge_desktop_ini(path, ".lab-icons-windows\\folder.ico")
+
+            self.assertIn("LocalizedResourceName=", merged)
+            self.assertIn("InfoTip=", merged)
+            self.assertIn("; LabIconsWindows=1", merged)
+            self.assertIn("IconFile=.lab-icons-windows\\folder.ico", merged)
+            self.assertNotIn("IconResource=%SystemRoot%", merged)
+
+    def test_existing_desktop_ini_attrs_removed_before_write(self) -> None:
+        calls: list[tuple[str, ...]] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            icon = folder / "source.ico"
+            desktop_ini = folder / "desktop.ini"
+            icon.write_bytes(b"ico")
+            desktop_ini.write_text("[.ShellClassInfo]\nIconIndex=0\n", encoding="utf-16")
+
+            original_attrib = folder_manager._attrib
+            try:
+                folder_manager._attrib = lambda *args: calls.append(tuple(str(arg) for arg in args))
+                folder_manager.apply_folder_icon(folder, icon)
+            finally:
+                folder_manager._attrib = original_attrib
+
+        self.assertIn(("-h", "-s", str(desktop_ini)), calls)
+
+    def test_read_folder_icon_resolves_relative_utf16_iconfile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            managed = folder / ".lab-icons-windows" / "folder.ico"
+            managed.parent.mkdir()
+            managed.write_bytes(b"ico")
+            (folder / "desktop.ini").write_text(
+                "\n".join(["[.ShellClassInfo]", "IconFile=.lab-icons-windows\\folder.ico", "IconIndex=0"]),
+                encoding="utf-16",
+            )
+
+            icon = read_folder_icon(folder)
+
+            self.assertEqual(icon, f"{managed},0")
+
+
+if __name__ == "__main__":
+    unittest.main()
