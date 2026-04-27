@@ -713,7 +713,10 @@ class IconMapperApp(ctk.CTk):
         self.discovered_targets = targets
         self.discovered_search_index = index
         self.perf.log("discovery.targets", (time.perf_counter() - started) * 1000, items=len(targets))
-        self.after(0, self.refresh_discovered_list)
+        try:
+            self.after(0, self.refresh_discovered_list)
+        except RuntimeError:
+            return
 
     def _schedule_discovered_filter(self, _event: object | None = None) -> None:
         if hasattr(self, "target_tabs") and self.target_tabs.get() != "Detectados":

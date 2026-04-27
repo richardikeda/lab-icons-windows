@@ -15,6 +15,8 @@ O projeto prioriza seguranca: ele nao modifica executaveis, DLLs, arquivos `.mun
 - Ao selecionar um PNG, o app prepara apenas aquele icone em segundo plano.
 - O botao **Processar pacote em background** continua existindo para preparar todos os PNGs sem travar a tela.
 - O botao **Abrir pasta icons-out** abre os icones gerados no Explorer.
+- O botao **Importar tema** aceita ZIP ou pasta com PNGs e manifesto JSON.
+- O botao **Excluir tema** remove os PNGs importados daquele tema e os mapeamentos associados.
 
 ### Geracao de icones
 
@@ -53,9 +55,44 @@ Apps modernos do Windows nem sempre expoem um `.lnk` editavel. Para esses casos,
 
 O app nao altera manifestos `AppxManifest.xml` de apps UWP/Store instalados. Essa escolha segue a rota menos invasiva: criar um atalho secundario editavel e alterar o icone desse atalho.
 
+### Temas prontos
+
+Um tema pode ser uma pasta ou um `.zip` contendo PNGs e um manifesto `theme.json`, `config.json` ou `manifest.json`.
+
+Exemplo:
+
+```json
+{
+  "theme": "Meu Tema",
+  "icons": [
+    {
+      "file": "assets/spotify.png",
+      "program": "Spotify",
+      "group": "media",
+      "program_group": "Comunicacao",
+      "target_type": "shortcut"
+    }
+  ]
+}
+```
+
+Campos suportados:
+
+- `theme` ou `name`: nome do tema.
+- `icons[].file` ou `icons[].png`: caminho relativo do PNG dentro do pacote.
+- `icons[].program`, `program_name` ou `app`: nome usado para associar o icone a apps detectados.
+- `icons[].group`: grupo visual dentro da biblioteca.
+- `icons[].program_group` ou `category`: grupo exibido na lista de customizados.
+- `icons[].target_type` ou `kind`: `shortcut` ou `folder`.
+- `icons[].target_path` ou `path`: caminho explicito do alvo, quando o nome nao for suficiente.
+
+Na importacao, os PNGs sao copiados para `icons-in/themes/<Tema>/...`, aparecem agrupados na biblioteca e podem gerar mapeamentos automaticos quando o app encontra um destino detectado com nome correspondente. O processamento dos ICOs continua usando o pipeline normal do app.
+
 ### Reaplicacao automatica
 
 A opcao global cria um atalho na pasta Startup do usuario. Ao iniciar o Windows, o app roda em modo de reaplicacao unica e reaplica icones customizados que tenham sido trocados por atualizacoes de apps ou alteracoes do Windows.
+
+Por padrao, novas customizacoes ficam com reaplicacao ligada. O arquivo `config/mappings.json` guarda o icone original, o icone aplicado, o PNG de origem, o tipo do alvo, o tema associado quando existir e os dados de boot. A interface tambem tem **Ver config** para visualizar esse arquivo sem sair do app.
 
 ### Aparencia e desempenho
 
@@ -64,6 +101,7 @@ A opcao global cria um atalho na pasta Startup do usuario. Ao iniciar o Windows,
 - A lista de apps detectados so e renderizada quando a aba **Detectados** e aberta.
 - O arquivo `config/mappings.json` evita reler o JSON inteiro em salvamentos sem mudanca; no caminho comum ele compara o estado serializado em memoria com a ultima gravacao e ainda preserva troca atomica quando precisa escrever.
 - O carregamento de `mappings.json` aceita UTF-8, UTF-8 com BOM e UTF-16 para tolerar arquivos salvos por ferramentas do Windows.
+- A importacao de temas valida caminhos relativos, rejeita ZIP com traversal, limita volume/quantidade de arquivos e copia apenas PNGs declarados no manifesto.
 - Arquivos locais de mapeamento vazios ou contendo apenas comentarios sao tratados como configuracao inicial, o que permite usar placeholders redigidos sem impedir a abertura do app.
 - A atualizacao da biblioteca em `icons-in/` reaproveita a mesma varredura para ordenar PNGs e detectar mudancas, reduzindo IO durante startup e refreshes da galeria.
 - Quando `icons-in/` ja contem PNGs, a tela pula a varredura recursiva de `icons-out/ico/`; o fallback para ICOs so roda quando a biblioteca de origem esta vazia.
@@ -88,6 +126,7 @@ Este projeto implementa apenas os mecanismos seguros para customizacao por usuar
 - **Apps UWP/Store:** usa atalhos gerenciados para `shell:AppsFolder\AppID`, sem editar manifesto AppX nem assets instalados pelo pacote.
 - **Atualizacao do Shell:** usa `SHChangeNotify` com eventos especificos de item/pasta para reduzir impacto no Explorer.
 - **Reversibilidade:** guarda o icone original no mapeamento e mantem copias versionadas por hash para evitar cache antigo.
+- **Temas:** importa assets para a biblioteca local do usuario/projeto, sem executar scripts ou alterar arquivos fora de `icons-in/themes`.
 
 Fora de escopo por seguranca:
 
@@ -143,7 +182,9 @@ python app.py
 4. Selecione um destino na aba **Detectados**, ou use **Adicionar App** / **Adicionar Pasta**.
 5. Confira os previews de original e atual/customizado.
 6. Clique em **Salvar e aplicar**.
-7. Ative **Reaplicar no boot** se quiser reaplicacao automatica ao iniciar o Windows.
+7. Mantenha **Reaplicar no boot** ativo para reaplicacao automatica ao iniciar o Windows.
+8. Use **Ver config** para inspecionar o `mappings.json`.
+9. Use **Importar tema** para carregar ZIPs ou pastas com manifesto.
 
 ## Configuracao Salva
 
@@ -172,7 +213,8 @@ Os mapeamentos ficam em `config/mappings.json`.
       "original_icon": "C:\\Windows\\System32\\notepad.exe,0",
       "is_customized": true,
       "known_key": "shortcut:C:\\Users\\you\\Desktop\\Notepad.lnk",
-      "auto_reapply": false
+      "auto_reapply": true,
+      "theme_name": "Meu Tema"
     }
   ]
 }
@@ -189,6 +231,7 @@ O app:
 - Nao altera o registro do Windows para trocar icones de apps.
 - Nao edita EXE, DLL, MUN ou manifestos AppX.
 - Preserva e faz backup do `desktop.ini` quando customiza pastas.
+- Importa temas sem executar conteudo do pacote; somente PNGs declarados no manifesto sao copiados.
 
 Alteracoes de `DefaultIcon` no registro sao adequadas para associacoes de arquivos ou instaladores. Para este app, a rota segura e `.lnk` para atalhos e `desktop.ini` para pastas.
 
@@ -226,6 +269,6 @@ Para gerar um unico `.exe`:
 - Filtro por grupo e tipo na biblioteca de icones.
 - Editor manual de temas e aliases de apps conhecidos.
 - Melhor correspondencia em **Carregar grupo de icones**, com fuzzy matching e confirmacao antes de aplicar.
-- Exportar/importar pacotes de temas.
+- Exportar pacote de tema a partir dos icones/mapeamentos atuais.
 - Opcao avancada para limpar cache de icones do Explorer quando o Windows demorar a refletir mudancas.
 - Avaliar migracao futura para WinUI 3 se o projeto precisar de integracao visual totalmente nativa.
