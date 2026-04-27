@@ -62,6 +62,43 @@ class MappingStoreTests(unittest.TestCase):
             self.assertTrue(reloaded.mappings[0].is_customized)
             self.assertEqual(reloaded.mappings[0].known_key, "appx:whatsapp")
 
+    def test_save_skips_unchanged_mappings_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mappings.json"
+            store = MappingStore(path)
+            first_stat = path.stat()
+
+            store.save()
+
+            self.assertEqual(path.stat().st_mtime_ns, first_stat.st_mtime_ns)
+
+    def test_load_accepts_utf16_mappings_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mappings.json"
+            path.write_text('{"version": 1, "settings": {}, "mappings": []}', encoding="utf-16")
+
+            store = MappingStore(path)
+
+            self.assertEqual(store.mappings, [])
+
+    def test_load_falls_back_when_first_decode_is_not_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mappings.json"
+            path.write_text('{"version": 1, "settings": {}, "mappings": []}', encoding="utf-16-be")
+
+            store = MappingStore(path)
+
+            self.assertEqual(store.mappings, [])
+
+    def test_load_treats_comment_only_mappings_file_as_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mappings.json"
+            path.write_text("# redacted local file\n# recreate on save", encoding="utf-16")
+
+            store = MappingStore(path)
+
+            self.assertEqual(store.mappings, [])
+
     def test_capture_original_replaces_shortcut_placeholder(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             mapping = MappingStore(Path(tmp) / "unused.json").add_mapping(

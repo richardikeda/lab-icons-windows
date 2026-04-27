@@ -55,6 +55,9 @@ A opcao global cria um atalho na pasta Startup do usuario. Ao iniciar o Windows,
 - A janela usa CustomTkinter e ajustes DWM do Windows para dark mode, cantos arredondados e backdrop nativo quando disponivel.
 - A descoberta de apps roda em segundo plano.
 - A lista de apps detectados so e renderizada quando a aba **Detectados** e aberta.
+- O arquivo `config/mappings.json` so e regravado quando ha mudancas reais, usando troca atomica para reduzir IO e evitar JSON parcial se o app for interrompido durante o salvamento.
+- O carregamento de `mappings.json` aceita UTF-8, UTF-8 com BOM e UTF-16 para tolerar arquivos salvos por ferramentas do Windows.
+- Arquivos locais de mapeamento vazios ou contendo apenas comentarios sao tratados como configuracao inicial, o que permite usar placeholders redigidos sem impedir a abertura do app.
 - Logs de performance sao gravados em `config/performance.log`.
 - O comando `python app.py --perf-smoke` mede o carregamento da janela sem abrir o app para uso normal.
 

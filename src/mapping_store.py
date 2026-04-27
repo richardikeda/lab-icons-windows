@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -41,7 +42,7 @@ class MappingStore:
             self.save()
             return
 
-        data = json.loads(self.path.read_text(encoding="utf-8"))
+        data = self._load_json()
         self.settings = data.get("settings", self.settings)
         self.mappings = [AppMapping(**self._normalize_mapping(item)) for item in data.get("mappings", [])]
 
@@ -51,7 +52,17 @@ class MappingStore:
             "settings": self.settings,
             "mappings": [asdict(mapping) for mapping in self.mappings],
         }
-        self.path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        serialized = json.dumps(payload, indent=2, ensure_ascii=False)
+        if self.path.exists() and self.path.read_text(encoding="utf-8") == serialized:
+            return
+
+        temp_path = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temp_path.write_text(serialized, encoding="utf-8")
+            os.replace(temp_path, self.path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
 
     def add_mapping(
         self,
@@ -111,3 +122,22 @@ class MappingStore:
         normalized.setdefault("is_customized", bool(normalized.get("auto_reapply")))
         normalized.setdefault("known_key", "")
         return normalized
+
+    def _load_json(self) -> dict:
+        last_error: UnicodeDecodeError | json.JSONDecodeError | None = None
+        for encoding in ("utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
+            try:
+                text = self.path.read_text(encoding=encoding)
+                if self._is_empty_or_comment_only(text):
+                    return {"settings": self.settings, "mappings": []}
+                return json.loads(text)
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                last_error = error
+                continue
+        if last_error:
+            raise last_error
+        raise ValueError(f"Unable to load mapping file: {self.path}")
+
+    def _is_empty_or_comment_only(self, text: str) -> bool:
+        lines = [line.strip() for line in text.splitlines()]
+        return all(not line or line.startswith("#") for line in lines)
