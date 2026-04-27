@@ -10,8 +10,8 @@ O projeto foi desenhado para personalizacao segura por usuario. A regra central 
 
 O programa deve:
 
-- Ler PNGs em `icons-in/`.
-- Gerar ICOs em `icons-out/ico/` com tamanhos adequados para Windows.
+- Ler PNGs em `icons-in/` na pasta de dados do ambiente atual.
+- Gerar ICOs em `icons-out/ico/` na pasta de dados do ambiente atual.
 - Gerar PNGs limpos em `icons-out/png/` para preview e usos futuros.
 - Detectar atalhos do Menu Iniciar, Area de Trabalho e pastas comuns do usuario.
 - Detectar apps modernos via `Get-StartApps` e criar atalhos gerenciados quando necessario.
@@ -43,6 +43,7 @@ lab-icons-windows/
     managed-shortcuts/
     icon-cache/
   src/
+    app_paths.py
     app_discovery.py
     appx_manager.py
     file_hashing.py
@@ -69,6 +70,12 @@ E o ponto de entrada. Ele cria as pastas essenciais, inicia a interface normal o
 
 - `--reapply-once`: carrega `config/mappings.json` e reaplica icones alterados.
 - `--perf-smoke`: abre a janela, mede tempo de inicializacao e fecha.
+
+Os caminhos mutaveis sao resolvidos por `src/app_paths.py`: em desenvolvimento, o app usa `config/`, `icons-in/` e `icons-out/` no repo; em execucao congelada/instalada, usa `%LOCALAPPDATA%\LabIcons\` para configuracao, logs, cache, atalhos gerenciados e assets gerados/importados.
+
+### `src/app_paths.py`
+
+Centraliza os caminhos do app. O modulo diferencia execucao via `python app.py` de execucao congelada (`sys.frozen`) e evita gravar dados mutaveis ao lado do executavel instalado. Para compatibilidade, ao iniciar em modo congelado ele reaproveita uma copia existente de `config/`, `icons-in/` ou `icons-out/` ao lado do executavel apenas se a pasta correspondente ainda nao existir em `%LOCALAPPDATA%\LabIcons\`.
 
 ### `src/ui.py`
 
@@ -147,7 +154,7 @@ No boot, `app.py --reapply-once` usa esse servico para recuperar customizacoes p
 
 ### `src/mapping_store.py`
 
-Gerencia `config/mappings.json`.
+Gerencia `config/mappings.json` dentro da pasta de dados do ambiente atual.
 
 O arquivo guarda:
 
@@ -247,7 +254,7 @@ O atalho executa:
 python app.py --reapply-once
 ```
 
-Em build congelado, usa o executavel atual como runtime e o `app.py` ao lado do app como argumento.
+Em build congelado, usa o executavel atual como runtime para executar `--reapply-once`.
 
 ### `src/shell_notify.py`
 
@@ -257,7 +264,7 @@ O app usa eventos especificos para item ou pasta, evitando operacoes globais agr
 
 ### `src/perf_logger.py`
 
-Registra metricas em `config/performance.log` em formato JSON Lines. O objetivo e medir rotas de inicializacao, descoberta, renderizacao e processamento sem adicionar dependencias pesadas.
+Registra metricas em `config/performance.log` na pasta de dados do ambiente atual, em formato JSON Lines. O objetivo e medir rotas de inicializacao, descoberta, renderizacao e processamento sem adicionar dependencias pesadas.
 
 ## 5. Fluxo de Uso Esperado
 

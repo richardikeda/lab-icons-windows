@@ -18,8 +18,12 @@ def enable_startup_reapply(app_path: Path) -> None:
     shortcut.parent.mkdir(parents=True, exist_ok=True)
     shell = _dispatch_shell()
     link = shell.CreateShortCut(str(shortcut))
-    link.Targetpath = sys.executable
-    link.Arguments = f'"{app_path}" --reapply-once'
+    if getattr(sys, "frozen", False) or app_path.suffix.lower() == ".exe":
+        link.Targetpath = str(app_path)
+        link.Arguments = "--reapply-once"
+    else:
+        link.Targetpath = sys.executable
+        link.Arguments = f'"{app_path}" --reapply-once'
     link.WorkingDirectory = str(app_path.parent)
     link.IconLocation = str(app_path)
     link.save()

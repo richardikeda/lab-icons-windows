@@ -16,6 +16,7 @@ import customtkinter as ctk
 from PIL import Image
 
 from src.app_discovery import DiscoveredTarget, _group_for_name, discover_targets, normalized_target_key
+from src.app_paths import AppPaths, coerce_app_paths
 from src.appx_manager import AppxShortcutError, create_managed_appx_shortcut
 from src.folder_manager import FolderIconError, read_folder_icon
 from src.icon_pipeline import (
@@ -147,14 +148,16 @@ def filter_discovered_targets(
 
 
 class IconMapperApp(ctk.CTk):
-    def __init__(self, base_dir: Path) -> None:
+    def __init__(self, base_dir: AppPaths | Path) -> None:
         super().__init__()
-        self.base_dir = base_dir
-        self.input_dir = base_dir / "icons-in"
-        self.output_dir = base_dir / "icons-out"
-        self.store = MappingStore(base_dir / "config" / "mappings.json")
-        self.icon_cache_dir = base_dir / "config" / "icon-cache"
-        self.perf = PerfLogger(base_dir / "config" / "performance.log")
+        self.paths = coerce_app_paths(base_dir)
+        self.paths.ensure_mutable_dirs()
+        self.base_dir = self.paths.app_dir
+        self.input_dir = self.paths.input_dir
+        self.output_dir = self.paths.output_dir
+        self.store = MappingStore(self.paths.mappings_file)
+        self.icon_cache_dir = self.paths.icon_cache_dir
+        self.perf = PerfLogger(self.paths.performance_log)
 
         self.selected_mapping: AppMapping | None = None
         self.selected_icon: Path | None = None
@@ -868,7 +871,7 @@ class IconMapperApp(ctk.CTk):
             return
         if target.target_type == "appx":
             try:
-                shortcut = create_managed_appx_shortcut(target.path, target.name, self.base_dir / "config" / "managed-shortcuts")
+                shortcut = create_managed_appx_shortcut(target.path, target.name, self.paths.managed_shortcuts_dir)
             except AppxShortcutError as exc:
                 messagebox.showerror("App do Windows", str(exc))
                 return
@@ -1036,7 +1039,7 @@ class IconMapperApp(ctk.CTk):
         self.store.settings["startup_reapply_enabled"] = enabled
         try:
             if enabled:
-                enable_startup_reapply(self.base_dir / "app.py")
+                enable_startup_reapply(self.paths.entrypoint)
             else:
                 disable_startup_reapply()
         except StartupError as exc:
@@ -1049,7 +1052,7 @@ class IconMapperApp(ctk.CTk):
         if not self.store.settings.get("startup_reapply_enabled", True):
             return
         try:
-            enable_startup_reapply(self.base_dir / "app.py")
+            enable_startup_reapply(self.paths.entrypoint)
         except StartupError as exc:
             self.store.settings["startup_reapply_enabled"] = False
             self.store.save()
@@ -1146,7 +1149,7 @@ class IconMapperApp(ctk.CTk):
                     target_path = create_managed_appx_shortcut(
                         target.path,
                         target.name,
-                        self.base_dir / "config" / "managed-shortcuts",
+                        self.paths.managed_shortcuts_dir,
                     )
                 except AppxShortcutError:
                     continue

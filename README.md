@@ -8,13 +8,13 @@ O projeto prioriza seguranca: ele nao modifica executaveis, DLLs, arquivos `.mun
 
 ### Biblioteca visual
 
-- Os PNGs de entrada ficam em `icons-in/`.
+- Em desenvolvimento, os PNGs de entrada ficam em `icons-in/` no repo. Em build/execucao instalada, ficam em `%LOCALAPPDATA%\LabIcons\icons-in\`.
 - A biblioteca atualiza automaticamente quando novos PNGs sao adicionados.
 - Os PNGs mais recentes aparecem primeiro.
 - A lista da direita mostra miniaturas limpas, sem fundo branco quando detectado.
 - Ao selecionar um PNG, o app prepara apenas aquele icone em segundo plano.
 - O botao **Processar pacote em background** continua existindo para preparar todos os PNGs sem travar a tela.
-- O botao **Abrir pasta icons-out** abre os icones gerados no Explorer.
+- O botao **Abrir pasta icons-out** abre a pasta de icones gerados do ambiente atual no Explorer.
 - O botao **Importar tema** aceita ZIP ou pasta com PNGs e manifesto JSON.
 - O botao **Excluir tema** remove os PNGs importados daquele tema e os mapeamentos associados.
 
@@ -86,7 +86,7 @@ Campos suportados:
 - `icons[].target_type` ou `kind`: `shortcut` ou `folder`.
 - `icons[].target_path` ou `path`: caminho explicito do alvo, quando o nome nao for suficiente.
 
-Na importacao, os PNGs sao copiados para `icons-in/themes/<Tema>/...`, aparecem agrupados na biblioteca e podem gerar mapeamentos automaticos quando o app encontra um destino detectado com nome correspondente. O processamento dos ICOs continua usando o pipeline normal do app.
+Na importacao, os PNGs sao copiados para `icons-in/themes/<Tema>/...` dentro da pasta de dados do ambiente atual, aparecem agrupados na biblioteca e podem gerar mapeamentos automaticos quando o app encontra um destino detectado com nome correspondente. O processamento dos ICOs continua usando o pipeline normal do app.
 
 ### Reaplicacao automatica
 
@@ -114,7 +114,7 @@ Por padrao, novas customizacoes ficam com reaplicacao ligada. O arquivo `config/
 - A extracao de previews nativos tenta `PrivateExtractIconsW` em 256 px primeiro, o que melhora fidelidade para bibliotecas modernas, executaveis, DLLs e arquivos `.mun` lidos como PE quando o Windows permite; se falhar, usa `ExtractIconEx` e depois `SHGetFileInfo`.
 - A extracao libera `HICON` e `DC` logo apos o uso, evitando acumulo de handles em refreshes repetidos da lista e da galeria.
 - O cache em memoria das miniaturas da UI agora e limitado e substitui entradas antigas do mesmo arquivo quando o preview muda, evitando crescimento continuo de RAM em sessoes longas com muitas atualizacoes de icones.
-- Logs de performance sao gravados em `config/performance.log`; se existir um placeholder UTF-16 herdado de redacao local, o app o normaliza uma vez para manter o arquivo legivel como JSON Lines UTF-8.
+- Logs de performance sao gravados em `config/performance.log` na pasta de dados do ambiente atual; se existir um placeholder UTF-16 herdado de redacao local, o app o normaliza uma vez para manter o arquivo legivel como JSON Lines UTF-8.
 - O comando `python app.py --perf-smoke` mede o carregamento da janela sem abrir o app para uso normal.
 
 ## Conformidade com Iconografia do Windows
@@ -189,7 +189,7 @@ python app.py
 
 ## Configuracao Salva
 
-Os mapeamentos ficam em `config/mappings.json`.
+Em desenvolvimento, os mapeamentos ficam em `config/mappings.json`. Em build/execucao instalada, ficam em `%LOCALAPPDATA%\LabIcons\config\mappings.json`.
 
 ```json
 {
@@ -225,7 +225,8 @@ Os mapeamentos ficam em `config/mappings.json`.
 
 O app:
 
-- Trabalha em pastas locais do projeto ou na pasta do executavel.
+- Em desenvolvimento, trabalha nas pastas locais do projeto.
+- Em build/execucao instalada, grava configuracoes, logs, cache, atalhos gerenciados, `icons-in/` e `icons-out/` em `%LOCALAPPDATA%\LabIcons\`.
 - Altera apenas atalhos `.lnk` e pastas escolhidas pelo usuario.
 - Nao roda como administrador.
 - Nao instala servico em background.
@@ -254,7 +255,7 @@ Para usar como aplicativo Windows sem console:
 .\scripts\build_windows.ps1
 ```
 
-O build sai em `dist/Lab Icons Windows/`. Em modo executavel, `icons-in/`, `icons-out/` e `config/` ficam ao lado do `.exe`, facilitando manutencao.
+O build sai em `dist/Lab Icons Windows/`. Em modo executavel/congelado, dados mutaveis ficam em `%LOCALAPPDATA%\LabIcons\` para evitar escrita na pasta de instalacao.
 
 Para gerar um unico `.exe`:
 
