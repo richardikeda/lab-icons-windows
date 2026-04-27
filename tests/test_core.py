@@ -247,6 +247,36 @@ class MappingStoreTests(unittest.TestCase):
 
             self.assertEqual(store.mappings, [])
 
+    def test_load_adds_backup_fields_to_legacy_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mappings.json"
+            path.write_text(
+                """
+                {
+                  "version": 1,
+                  "settings": {},
+                  "mappings": [
+                    {
+                      "id": "legacy",
+                      "program_name": "Demo",
+                      "program_group": "Dev",
+                      "shortcut_path": "Demo.lnk",
+                      "icon_group": "dev",
+                      "source_icon": "demo.png",
+                      "ico_path": "demo.ico"
+                    }
+                  ]
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            store = MappingStore(path)
+
+            self.assertEqual(store.mappings[0].backup_icon_path, "")
+            self.assertEqual(store.mappings[0].backup_desktop_ini_path, "")
+            self.assertEqual(store.mappings[0].backup_created_at, "")
+
     def test_capture_original_replaces_shortcut_placeholder(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             mapping = MappingStore(Path(tmp) / "unused.json").add_mapping(
@@ -268,6 +298,89 @@ class MappingStoreTests(unittest.TestCase):
             reapply_service.read_shortcut_icon = original_reader
 
         self.assertEqual(mapping.original_icon, "C:/Program Files/Demo/demo.exe,0")
+
+    def test_capture_original_copies_shortcut_ico_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            original_icon = base / "original.ico"
+            original_icon.write_bytes(b"ico-data")
+            backup_dir = base / "Backups"
+            mapping = MappingStore(base / "mappings.json").add_mapping(
+                program_name="Demo",
+                program_group="Dev",
+                shortcut_path=str(base / "Demo.lnk"),
+                icon_group="dev",
+                source_icon="",
+                ico_path=str(base / "custom.ico"),
+                auto_reapply=False,
+                target_type="shortcut",
+            )
+
+            with mock.patch("src.reapply_service.read_shortcut_icon", return_value=f"{original_icon},0"):
+                with mock.patch("src.backup_manager.default_backup_dir", return_value=backup_dir):
+                    reapply_service.capture_original_icon(mapping)
+
+            backup = Path(mapping.backup_icon_path)
+            self.assertEqual(mapping.original_icon, f"{original_icon},0")
+            self.assertTrue(backup.is_file())
+            self.assertEqual(backup.parent, backup_dir)
+            self.assertEqual(backup.read_bytes(), b"ico-data")
+            self.assertTrue(mapping.backup_created_at)
+
+    def test_capture_original_backs_up_folder_desktop_ini_outside_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            folder = base / "Folder"
+            backup_dir = base / "Backups"
+            folder.mkdir()
+            (folder / "desktop.ini").write_text("[.ShellClassInfo]\nIconFile=old.ico\n", encoding="utf-16")
+            mapping = MappingStore(base / "mappings.json").add_mapping(
+                program_name="Folder",
+                program_group="Pastas",
+                shortcut_path=str(folder),
+                icon_group="folders",
+                source_icon="",
+                ico_path=str(base / "custom.ico"),
+                auto_reapply=False,
+                target_type="folder",
+            )
+
+            with mock.patch("src.backup_manager.default_backup_dir", return_value=backup_dir):
+                reapply_service.capture_original_icon(mapping)
+
+            backup = Path(mapping.backup_desktop_ini_path)
+            self.assertTrue(backup.is_file())
+            self.assertEqual(backup.parent, backup_dir)
+            self.assertNotEqual(backup.parent, folder)
+            self.assertIn("IconFile=old.ico", backup.read_text(encoding="utf-16"))
+
+    def test_restore_shortcut_falls_back_to_backup_when_original_missing(self) -> None:
+        calls: list[str] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            backup = base / "Backups" / "original.ico"
+            backup.parent.mkdir()
+            backup.write_bytes(b"ico")
+            mapping = MappingStore(base / "mappings.json").add_mapping(
+                program_name="Demo",
+                program_group="Dev",
+                shortcut_path=str(base / "Demo.lnk"),
+                icon_group="dev",
+                source_icon="",
+                ico_path=str(base / "custom.ico"),
+                auto_reapply=False,
+                target_type="shortcut",
+                original_icon=str(base / "missing.exe") + ",0",
+                backup_icon_path=str(backup),
+            )
+
+            with mock.patch(
+                "src.reapply_service.restore_shortcut_icon",
+                side_effect=lambda _p, icon: calls.append(icon),
+            ):
+                reapply_service.restore_mapping(mapping)
+
+        self.assertEqual(calls, [f"{backup},0"])
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -387,6 +500,32 @@ class FolderIniTests(unittest.TestCase):
             icon = read_folder_icon(folder)
 
             self.assertEqual(icon, f"{managed},0")
+
+    def test_remove_folder_icon_restores_external_desktop_ini_backup(self) -> None:
+        calls: list[tuple[str, ...]] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Folder"
+            folder.mkdir()
+            managed = folder / ".lab-icons-windows"
+            managed.mkdir()
+            desktop_ini = folder / "desktop.ini"
+            desktop_ini.write_text(
+                "[.ShellClassInfo]\n; LabIconsWindows=1\nIconResource=.lab-icons-windows\\folder.ico,0\n",
+                encoding="utf-16",
+            )
+            external_backup = Path(tmp) / "Backups" / "folder-desktop.ini"
+            external_backup.parent.mkdir()
+            external_backup.write_text("[.ShellClassInfo]\nIconFile=old.ico\n", encoding="utf-16")
+
+            original_attrib = folder_manager._attrib
+            try:
+                folder_manager._attrib = lambda *args: calls.append(tuple(str(arg) for arg in args))
+                folder_manager.remove_folder_icon(folder, external_backup)
+            finally:
+                folder_manager._attrib = original_attrib
+
+            self.assertIn("IconFile=old.ico", desktop_ini.read_text(encoding="utf-16"))
+            self.assertFalse(managed.exists())
 
 
 if __name__ == "__main__":

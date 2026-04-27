@@ -89,9 +89,14 @@ def read_folder_icon(folder_path: Path) -> str:
     return normalized
 
 
-def remove_folder_icon(folder_path: Path) -> None:
+def remove_folder_icon(folder_path: Path, backup_desktop_ini_path: Path | None = None) -> None:
     desktop_ini = folder_path / "desktop.ini"
     if not desktop_ini.exists():
+        if backup_desktop_ini_path and backup_desktop_ini_path.exists():
+            shutil.copy2(backup_desktop_ini_path, desktop_ini)
+            _attrib("+h", "+s", desktop_ini)
+            _attrib("+s", "+r", folder_path)
+            notify_shell_dir_changed(folder_path)
         return
     content = _read_desktop_ini(desktop_ini)
     if "LabIconsWindows=1" not in content:
@@ -99,13 +104,23 @@ def remove_folder_icon(folder_path: Path) -> None:
     _attrib("-h", "-s", desktop_ini)
     desktop_ini.unlink()
     managed_dir = folder_path / MANAGED_DIR
+    restored = False
+    if backup_desktop_ini_path and backup_desktop_ini_path.exists():
+        shutil.copy2(backup_desktop_ini_path, desktop_ini)
+        restored = True
     if managed_dir.exists():
         backup_ini = managed_dir / BACKUP_INI
-        if backup_ini.exists():
+        if not restored and backup_ini.exists():
             shutil.copy2(backup_ini, desktop_ini)
+            restored = True
         _attrib("-h", managed_dir)
         shutil.rmtree(managed_dir, ignore_errors=True)
-    _attrib("-s", "-r", folder_path)
+    if restored:
+        _attrib("+h", "+s", desktop_ini)
+        _attrib("+s", "+r", folder_path)
+    else:
+        _attrib("-s", "-r", folder_path)
+    notify_shell_dir_changed(folder_path)
 
 
 def _attrib(*args: str | Path) -> None:

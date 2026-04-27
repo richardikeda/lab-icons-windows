@@ -13,14 +13,18 @@ class AppPathsTests(unittest.TestCase):
     def test_dev_runtime_keeps_mutable_data_in_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
-            app_paths = AppPaths.from_dirs(app_dir=repo, data_dir=repo)
-            app_paths.ensure_mutable_dirs()
+            local_app_data = repo / "LocalAppData"
+            with mock.patch.dict("os.environ", {"LOCALAPPDATA": str(local_app_data)}, clear=False):
+                app_paths = AppPaths.from_dirs(app_dir=repo, data_dir=repo)
+                app_paths.ensure_mutable_dirs()
 
             self.assertEqual(app_paths.input_dir, repo / "icons-in")
             self.assertEqual(app_paths.output_dir, repo / "icons-out")
             self.assertEqual(app_paths.mappings_file, repo / "config" / "mappings.json")
+            self.assertEqual(app_paths.backup_dir, local_app_data / APP_DATA_DIR_NAME / "Backups")
             self.assertTrue((repo / "icons-in").is_dir())
             self.assertTrue((repo / "config" / "managed-shortcuts").is_dir())
+            self.assertTrue((local_app_data / APP_DATA_DIR_NAME / "Backups").is_dir())
 
     def test_frozen_runtime_uses_local_app_data_and_copies_legacy_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -45,6 +49,7 @@ class AppPathsTests(unittest.TestCase):
             self.assertEqual(app_paths.input_dir, expected_data_dir / "icons-in")
             self.assertEqual(app_paths.output_dir, expected_data_dir / "icons-out")
             self.assertEqual(app_paths.mappings_file, expected_data_dir / "config" / "mappings.json")
+            self.assertEqual(app_paths.backup_dir, local_app_data / APP_DATA_DIR_NAME / "Backups")
             self.assertTrue(app_paths.mappings_file.exists())
 
     def test_startup_shortcut_targets_frozen_executable_directly(self) -> None:

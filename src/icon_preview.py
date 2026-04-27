@@ -32,6 +32,23 @@ def preview_for_icon_location(icon_location: str, cache_dir: Path) -> Path | Non
     return output
 
 
+def extract_icon_to_ico(icon_path: Path, icon_index: int, output_path: Path) -> Path | None:
+    try:
+        image = _extract_windows_icon(icon_path, icon_index)
+    except Exception:
+        try:
+            image = _extract_shell_icon(icon_path)
+        except Exception:
+            return None
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(
+        output_path,
+        format="ICO",
+        sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+    )
+    return output_path
+
+
 def _cache_key(path: Path, icon_index: int) -> str:
     try:
         stat = path.stat()

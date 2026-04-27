@@ -21,6 +21,7 @@ class AppPaths:
     performance_log: Path
     icon_cache_dir: Path
     managed_shortcuts_dir: Path
+    backup_dir: Path
     entrypoint: Path
     is_frozen: bool
 
@@ -57,6 +58,7 @@ class AppPaths:
             performance_log=config_dir / "performance.log",
             icon_cache_dir=config_dir / "icon-cache",
             managed_shortcuts_dir=config_dir / "managed-shortcuts",
+            backup_dir=_local_app_data_dir() / "Backups",
             entrypoint=Path(entrypoint) if entrypoint else app_dir / "app.py",
             is_frozen=is_frozen,
         )
@@ -68,6 +70,7 @@ class AppPaths:
             self.config_dir,
             self.icon_cache_dir,
             self.managed_shortcuts_dir,
+            self.backup_dir,
         ):
             folder.mkdir(parents=True, exist_ok=True)
 

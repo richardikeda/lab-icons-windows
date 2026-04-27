@@ -21,6 +21,9 @@ class AppMapping:
     png_path: str = ""
     preferred_asset: str = "ico"
     original_icon: str = ""
+    backup_icon_path: str = ""
+    backup_desktop_ini_path: str = ""
+    backup_created_at: str = ""
     is_customized: bool = False
     known_key: str = ""
     theme_name: str = ""
@@ -78,6 +81,9 @@ class MappingStore:
         png_path: str = "",
         preferred_asset: str = "ico",
         original_icon: str = "",
+        backup_icon_path: str = "",
+        backup_desktop_ini_path: str = "",
+        backup_created_at: str = "",
         is_customized: bool = False,
         known_key: str = "",
         theme_name: str = "",
@@ -95,6 +101,9 @@ class MappingStore:
             png_path=png_path,
             preferred_asset=preferred_asset,
             original_icon=original_icon,
+            backup_icon_path=backup_icon_path,
+            backup_desktop_ini_path=backup_desktop_ini_path,
+            backup_created_at=backup_created_at,
             is_customized=is_customized,
             known_key=known_key,
             theme_name=theme_name,
@@ -121,6 +130,9 @@ class MappingStore:
         normalized.setdefault("png_path", "")
         normalized.setdefault("preferred_asset", "ico")
         normalized.setdefault("original_icon", "")
+        normalized.setdefault("backup_icon_path", "")
+        normalized.setdefault("backup_desktop_ini_path", "")
+        normalized.setdefault("backup_created_at", "")
         normalized.setdefault("is_customized", bool(normalized.get("auto_reapply")))
         normalized.setdefault("known_key", "")
         normalized.setdefault("theme_name", "")

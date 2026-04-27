@@ -7,7 +7,7 @@ from unittest import mock
 
 from PIL import Image
 
-from src.icon_preview import preview_for_icon_location
+from src.icon_preview import extract_icon_to_ico, preview_for_icon_location
 
 
 class IconPreviewTests(unittest.TestCase):
@@ -96,6 +96,21 @@ class IconPreviewTests(unittest.TestCase):
         self.assertIn(("memdc.delete",), calls)
         self.assertIn(("hdc.delete",), calls)
         self.assertIn(("release", 0, "screen-dc"), calls)
+
+    def test_extract_icon_to_ico_saves_extracted_resource(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "backup.ico"
+
+            with mock.patch(
+                "src.icon_preview._extract_windows_icon",
+                return_value=Image.new("RGBA", (32, 32), (1, 2, 3, 255)),
+            ):
+                result = extract_icon_to_ico(Path("C:/Demo.exe"), 0, output)
+
+            self.assertEqual(result, output)
+            self.assertTrue(output.exists())
+            with Image.open(output) as image:
+                self.assertEqual(image.format, "ICO")
 
 
 if __name__ == "__main__":
