@@ -17,7 +17,7 @@ def preview_for_icon_location(icon_location: str, cache_dir: Path) -> Path | Non
         return path
 
     cache_dir.mkdir(parents=True, exist_ok=True)
-    key = hashlib.sha1(f"{path}|{icon_index}".encode("utf-8", errors="ignore")).hexdigest()
+    key = _cache_key(path, icon_index)
     output = cache_dir / f"{key}.png"
     if output.exists():
         return output
@@ -30,6 +30,15 @@ def preview_for_icon_location(icon_location: str, cache_dir: Path) -> Path | Non
             return None
     image.save(output, format="PNG")
     return output
+
+
+def _cache_key(path: Path, icon_index: int) -> str:
+    try:
+        stat = path.stat()
+        fingerprint = f"{path}|{icon_index}|{stat.st_mtime_ns}|{stat.st_size}"
+    except OSError:
+        fingerprint = f"{path}|{icon_index}"
+    return hashlib.sha1(fingerprint.encode("utf-8", errors="ignore")).hexdigest()
 
 
 def _parse_icon_location(icon_location: str) -> tuple[str, int]:
@@ -53,19 +62,22 @@ def _extract_windows_icon(path: Path, icon_index: int) -> Image.Image:
         raise ValueError("No icon found")
     hicon = icons[0]
     width = height = 48
-    hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
+    screen_dc = win32gui.GetDC(0)
+    hdc = win32ui.CreateDCFromHandle(screen_dc)
     memdc = hdc.CreateCompatibleDC()
     bitmap = win32ui.CreateBitmap()
-    bitmap.CreateCompatibleBitmap(hdc, width, height)
-    memdc.SelectObject(bitmap)
-    memdc.FillSolidRect((0, 0, width, height), win32gui.RGB(0, 0, 0))
-    win32gui.DrawIconEx(memdc.GetSafeHdc(), 0, 0, hicon, width, height, 0, None, win32con.DI_NORMAL)
-    bits = bitmap.GetBitmapBits(True)
-    image = Image.frombuffer("RGBA", (width, height), bits, "raw", "BGRA", 0, 1)
-    win32gui.DestroyIcon(hicon)
-    memdc.DeleteDC()
-    hdc.DeleteDC()
-    return image
+    try:
+        bitmap.CreateCompatibleBitmap(hdc, width, height)
+        memdc.SelectObject(bitmap)
+        memdc.FillSolidRect((0, 0, width, height), win32gui.RGB(0, 0, 0))
+        win32gui.DrawIconEx(memdc.GetSafeHdc(), 0, 0, hicon, width, height, 0, None, win32con.DI_NORMAL)
+        bits = bitmap.GetBitmapBits(True)
+        return Image.frombuffer("RGBA", (width, height), bits, "raw", "BGRA", 0, 1)
+    finally:
+        win32gui.DestroyIcon(hicon)
+        memdc.DeleteDC()
+        hdc.DeleteDC()
+        win32gui.ReleaseDC(0, screen_dc)
 
 
 def _extract_shell_icon(path: Path) -> Image.Image:
@@ -78,16 +90,19 @@ def _extract_shell_icon(path: Path) -> Image.Image:
     info = shell.SHGetFileInfo(str(path), 0, flags)
     hicon = info[0]
     width = height = 48
-    hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
+    screen_dc = win32gui.GetDC(0)
+    hdc = win32ui.CreateDCFromHandle(screen_dc)
     memdc = hdc.CreateCompatibleDC()
     bitmap = win32ui.CreateBitmap()
-    bitmap.CreateCompatibleBitmap(hdc, width, height)
-    memdc.SelectObject(bitmap)
-    memdc.FillSolidRect((0, 0, width, height), win32gui.RGB(0, 0, 0))
-    win32gui.DrawIconEx(memdc.GetSafeHdc(), 0, 0, hicon, width, height, 0, None, win32con.DI_NORMAL)
-    bits = bitmap.GetBitmapBits(True)
-    image = Image.frombuffer("RGBA", (width, height), bits, "raw", "BGRA", 0, 1)
-    win32gui.DestroyIcon(hicon)
-    memdc.DeleteDC()
-    hdc.DeleteDC()
-    return image
+    try:
+        bitmap.CreateCompatibleBitmap(hdc, width, height)
+        memdc.SelectObject(bitmap)
+        memdc.FillSolidRect((0, 0, width, height), win32gui.RGB(0, 0, 0))
+        win32gui.DrawIconEx(memdc.GetSafeHdc(), 0, 0, hicon, width, height, 0, None, win32con.DI_NORMAL)
+        bits = bitmap.GetBitmapBits(True)
+        return Image.frombuffer("RGBA", (width, height), bits, "raw", "BGRA", 0, 1)
+    finally:
+        win32gui.DestroyIcon(hicon)
+        memdc.DeleteDC()
+        hdc.DeleteDC()
+        win32gui.ReleaseDC(0, screen_dc)

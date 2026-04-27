@@ -59,7 +59,15 @@ A opcao global cria um atalho na pasta Startup do usuario. Ao iniciar o Windows,
 - O arquivo `config/mappings.json` evita reler o JSON inteiro em salvamentos sem mudanca; no caminho comum ele compara o estado serializado em memoria com a ultima gravacao e ainda preserva troca atomica quando precisa escrever.
 - O carregamento de `mappings.json` aceita UTF-8, UTF-8 com BOM e UTF-16 para tolerar arquivos salvos por ferramentas do Windows.
 - Arquivos locais de mapeamento vazios ou contendo apenas comentarios sao tratados como configuracao inicial, o que permite usar placeholders redigidos sem impedir a abertura do app.
+- A atualizacao da biblioteca em `icons-in/` reaproveita a mesma varredura para ordenar PNGs e detectar mudancas, reduzindo IO durante startup e refreshes da galeria.
+- Quando `icons-in/` ja contem PNGs, a tela pula a varredura recursiva de `icons-out/ico/`; o fallback para ICOs so roda quando a biblioteca de origem esta vazia.
+- A galeria precomputa grupo, caminho relativo e estado pronto/novo de cada item durante `refresh_icons()`, evitando repetir essas derivacoes e `stat()` a cada rerender e durante a digitacao no filtro.
 - A geracao de cada icone reutiliza a mesma base quadrada para PNG e ICO, cortando uma etapa de preparo por arquivo e reduzindo CPU em lotes maiores.
+- A descoberta de atalhos e pastas evita `Path.resolve()` ao montar chaves internas, usando caminho absoluto normalizado do Windows para reduzir IO extra durante startup e na criacao manual de mapeamentos.
+- A aplicacao de icones em atalhos e pastas agora calcula o nome versionado do ICO com hash em streaming, evitando carregar o arquivo inteiro na memoria a cada reaplicacao.
+- Previews extraidos de `.lnk`, `.exe` e outros arquivos do Windows passam a invalidar o cache automaticamente quando o arquivo de origem muda, evitando miniaturas antigas apos updates de apps ou troca de icone.
+- A extracao de previews nativos do Windows libera `HICON` e `DC` logo apos o uso, evitando acumulo de handles em refreshes repetidos da lista e da galeria.
+- O cache em memoria das miniaturas da UI agora e limitado e substitui entradas antigas do mesmo arquivo quando o preview muda, evitando crescimento continuo de RAM em sessoes longas com muitas atualizacoes de icones.
 - Logs de performance sao gravados em `config/performance.log`.
 - O comando `python app.py --perf-smoke` mede o carregamento da janela sem abrir o app para uso normal.
 

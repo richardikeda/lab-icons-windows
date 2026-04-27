@@ -277,6 +277,10 @@ class DiscoveredTarget:
     current_icon: str = ""
 
 
+def normalized_target_key(path: Path) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
 def discover_targets() -> list[DiscoveredTarget]:
     targets = _discover_common_folders()
     targets.extend(_discover_shortcuts())
@@ -295,7 +299,7 @@ def _discover_common_folders() -> list[DiscoveredTarget]:
         if path.exists():
             found.append(
                 DiscoveredTarget(
-                    key=f"folder:{path.resolve()}",
+                    key=f"folder:{normalized_target_key(path)}",
                     name=name,
                     group=group,
                     path=str(path),
@@ -358,7 +362,7 @@ def _discover_shortcuts() -> list[DiscoveredTarget]:
             name = shortcut.stem
             found.append(
                 DiscoveredTarget(
-                    key=f"shortcut:{shortcut.resolve()}",
+                    key=f"shortcut:{normalized_target_key(shortcut)}",
                     name=name,
                     group=_group_for_name(name, shortcut),
                     path=str(shortcut),

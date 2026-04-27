@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import hashlib
 import shutil
 from pathlib import Path
 
+from src.file_hashing import sha1_digest_prefix
 from src.shell_notify import notify_shell_item_changed
 
 
@@ -68,10 +68,7 @@ def _applied_shortcut_icon(ico_path: Path) -> Path:
 
 
 def _file_digest(path: Path) -> str:
-    try:
-        return hashlib.sha1(path.read_bytes()).hexdigest()[:12]
-    except OSError:
-        return hashlib.sha1(str(path).encode("utf-8", errors="ignore")).hexdigest()[:12]
+    return sha1_digest_prefix(path)
 
 
 def _load_shell_link(shortcut_path: Path):

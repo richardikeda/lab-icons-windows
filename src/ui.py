@@ -5,25 +5,28 @@ import queue
 import threading
 import time
 import hashlib
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 from PIL import Image
 
-from src.app_discovery import DiscoveredTarget, _group_for_name, discover_targets
+from src.app_discovery import DiscoveredTarget, _group_for_name, discover_targets, normalized_target_key
 from src.appx_manager import AppxShortcutError, create_managed_appx_shortcut
 from src.folder_manager import FolderIconError, read_folder_icon
 from src.icon_pipeline import (
     discover_pngs,
+    discover_png_entries,
     icon_group_for,
     migrate_legacy_icons,
     output_path_for,
     png_output_path_for,
     process_icon,
     remove_edge_white_background,
+    snapshot_pngs,
     soften_corner_marks,
 )
 from src.icon_preview import preview_for_icon_location
@@ -38,6 +41,86 @@ from src.windows_native import apply_native_window_style
 DISCOVERED_IDLE_LIMIT = 120
 DISCOVERED_SEARCH_LIMIT = 70
 DISCOVERED_SEARCH_DEBOUNCE_MS = 180
+ICON_IMAGE_CACHE_LIMIT = 512
+
+ImageCacheSignature = tuple[int, int] | None
+ImageCacheKey = tuple[Path, int, ImageCacheSignature]
+
+
+@dataclass(frozen=True)
+class GalleryEntry:
+    item_path: Path
+    generated_path: Path
+    group: str
+    relative_text: str
+    search_text: str
+    is_png: bool
+    ready: bool
+
+
+def remember_icon_image(
+    cache: OrderedDict[ImageCacheKey, ctk.CTkImage],
+    key: ImageCacheKey,
+    image: ctk.CTkImage,
+    *,
+    limit: int = ICON_IMAGE_CACHE_LIMIT,
+) -> None:
+    stale_keys = [existing for existing in cache if existing[:2] == key[:2] and existing != key]
+    for stale_key in stale_keys:
+        del cache[stale_key]
+    cache[key] = image
+    cache.move_to_end(key)
+    while len(cache) > limit:
+        cache.popitem(last=False)
+
+
+def discover_gallery_icons(source_pngs: list[Path], output_dir: Path) -> list[Path]:
+    if source_pngs:
+        return []
+    return sorted((output_dir / "ico").rglob("*.ico"), key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def gallery_icon_ready(source_path: Path, generated_path: Path) -> bool:
+    if source_path.suffix.lower() != ".png":
+        return generated_path.exists()
+    try:
+        return generated_path.exists() and source_path.stat().st_mtime <= generated_path.stat().st_mtime
+    except OSError:
+        return False
+
+
+def _gallery_group_for_ico(output_dir: Path, ico_path: Path) -> str:
+    try:
+        relative = ico_path.relative_to(output_dir / "ico")
+    except ValueError:
+        return "default"
+    if len(relative.parts) <= 1:
+        return "default"
+    return str(Path(*relative.parts[:-1]))
+
+
+def build_gallery_entries(input_dir: Path, output_dir: Path, gallery_items: list[Path]) -> list[GalleryEntry]:
+    entries: list[GalleryEntry] = []
+    for item in gallery_items:
+        is_png = item.suffix.lower() == ".png"
+        base = input_dir if is_png else output_dir / "ico"
+        try:
+            relative = str(item.relative_to(base))
+        except ValueError:
+            relative = item.name
+        generated = output_path_for(input_dir, output_dir, item) if is_png else item
+        entries.append(
+            GalleryEntry(
+                item_path=item,
+                generated_path=generated,
+                group=icon_group_for(input_dir, item) if is_png else _gallery_group_for_ico(output_dir, item),
+                relative_text=relative,
+                search_text=relative.casefold(),
+                is_png=is_png,
+                ready=gallery_icon_ready(item, generated),
+            )
+        )
+    return entries
 
 
 def discovered_search_text(target: DiscoveredTarget) -> str:
@@ -75,12 +158,13 @@ class IconMapperApp(ctk.CTk):
         self.selected_png: Path | None = None
         self.source_pngs: list[Path] = []
         self.available_icons: list[Path] = []
+        self.gallery_entries: list[GalleryEntry] = []
         self.discovered_targets: list[DiscoveredTarget] = []
         self.discovered_search_index: dict[str, str] = {}
-        self.icon_images: dict[tuple[Path, int], ctk.CTkImage] = {}
+        self.icon_images: OrderedDict[ImageCacheKey, ctk.CTkImage] = OrderedDict()
         self.process_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.processing = False
-        self._icons_snapshot: tuple[tuple[str, float], ...] = ()
+        self._icons_snapshot: tuple[tuple[str, int], ...] = ()
         self._discovered_render_after: str | None = None
 
         migrate_legacy_icons(self.output_dir)
@@ -479,9 +563,13 @@ class IconMapperApp(ctk.CTk):
         ).grid(row=1, column=0, sticky="ew")
 
     def refresh_icons(self) -> None:
-        self.source_pngs = sorted(discover_pngs(self.input_dir), key=lambda path: path.stat().st_mtime, reverse=True)
-        self.available_icons = sorted((self.output_dir / "ico").rglob("*.ico"), key=lambda path: path.stat().st_mtime, reverse=True)
-        self._icons_snapshot = self._snapshot_icons()
+        # Reuse one directory walk for sorting and change detection to trim startup and refresh IO.
+        png_entries = discover_png_entries(self.input_dir)
+        self.source_pngs = [path for path, _mtime_ns in sorted(png_entries, key=lambda item: item[1], reverse=True)]
+        # Skip the fallback ICO tree walk when the source PNG library is already available.
+        self.available_icons = discover_gallery_icons(self.source_pngs, self.output_dir)
+        self.gallery_entries = build_gallery_entries(self.input_dir, self.output_dir, self.source_pngs or self.available_icons)
+        self._icons_snapshot = snapshot_pngs(png_entries)
         self.refresh_icon_gallery()
 
     def _poll_icon_folder(self) -> None:
@@ -491,28 +579,20 @@ class IconMapperApp(ctk.CTk):
             self.set_status("Biblioteca atualizada.")
         self.after(2000, self._poll_icon_folder)
 
-    def _snapshot_icons(self) -> tuple[tuple[str, float], ...]:
-        items = []
-        for path in discover_pngs(self.input_dir):
-            try:
-                items.append((str(path), path.stat().st_mtime))
-            except OSError:
-                continue
-        return tuple(sorted(items))
+    def _snapshot_icons(self) -> tuple[tuple[str, int], ...]:
+        return snapshot_pngs(discover_png_entries(self.input_dir))
 
     def refresh_icon_gallery(self) -> None:
         started = time.perf_counter()
         for child in self.icon_gallery.winfo_children():
             child.destroy()
         needle = self.icon_filter.get().strip().lower() if hasattr(self, "icon_filter") else ""
-        grouped: dict[str, list[Path]] = defaultdict(list)
-        gallery_items = self.source_pngs or self.available_icons
-        for item in gallery_items:
-            base = self.input_dir if item.suffix.lower() == ".png" else self.output_dir / "ico"
-            relative = str(item.relative_to(base))
-            if needle and needle not in relative.lower():
+        grouped: dict[str, list[GalleryEntry]] = defaultdict(list)
+        gallery_items = self.gallery_entries
+        for entry in gallery_items:
+            if needle and needle not in entry.search_text:
                 continue
-            grouped[self._group_for_source(item)].append(item)
+            grouped[entry.group].append(entry)
         if not grouped:
             ctk.CTkLabel(
                 self.icon_gallery,
@@ -530,19 +610,17 @@ class IconMapperApp(ctk.CTk):
             grid = ctk.CTkFrame(self.icon_gallery, fg_color="transparent")
             grid.pack(fill="x", padx=6, pady=(0, 6))
             grid.grid_columnconfigure((0, 1), weight=1, uniform="icons")
-            for index, item in enumerate(icons):
-                is_png = item.suffix.lower() == ".png"
-                generated = output_path_for(self.input_dir, self.output_dir, item) if is_png else item
-                preview_path = self._gallery_preview_for_source(item) if is_png else self._png_for_ico(item)
-                ready = generated.exists()
+            for index, entry in enumerate(icons):
+                item = entry.item_path
+                preview_path = self._gallery_preview_for_source(item) if entry.is_png else self._png_for_ico(item)
                 button = ctk.CTkButton(
                     grid,
-                    text=f"{item.stem}\n{'pronto' if ready else 'novo'}",
+                    text=f"{item.stem}\n{'pronto' if entry.ready else 'novo'}",
                     image=self._icon_image(preview_path or item),
                     compound="top",
                     width=92,
                     height=104,
-                    fg_color=self._icon_button_color(generated),
+                    fg_color=self._icon_button_color(entry.generated_path),
                     hover_color="#465a7d",
                     text_color="#d8e3f3",
                     corner_radius=18,
@@ -661,7 +739,7 @@ class IconMapperApp(ctk.CTk):
     def start_processing(self) -> None:
         if self.processing:
             return
-        pngs = discover_pngs(self.input_dir)
+        pngs = list(self.source_pngs) if self.source_pngs else discover_pngs(self.input_dir)
         if not pngs:
             self.set_status("Nenhum PNG encontrado em icons-in.")
             return
@@ -719,7 +797,7 @@ class IconMapperApp(ctk.CTk):
             self._create_mapping(
                 Path(path),
                 "shortcut",
-                known_key=f"shortcut:{Path(path).resolve()}",
+                known_key=f"shortcut:{normalized_target_key(Path(path))}",
                 original_icon=str(Path(path)),
             )
 
@@ -730,7 +808,7 @@ class IconMapperApp(ctk.CTk):
             self._create_mapping(
                 folder,
                 "folder",
-                known_key=f"folder:{folder.resolve()}",
+                known_key=f"folder:{normalized_target_key(folder)}",
                 original_icon=read_folder_icon(folder),
             )
 
@@ -1082,8 +1160,10 @@ class IconMapperApp(ctk.CTk):
         return self._sized_icon_image(path, 128)
 
     def _sized_icon_image(self, path: Path, size: int) -> ctk.CTkImage:
-        cached = self.icon_images.get((path, size))
+        key = (path, size, self._image_cache_signature(path))
+        cached = self.icon_images.get(key)
         if cached:
+            self.icon_images.move_to_end(key)
             return cached
         try:
             image = Image.open(path).convert("RGBA")
@@ -1091,8 +1171,16 @@ class IconMapperApp(ctk.CTk):
             image = Image.new("RGBA", (size, size), (148, 163, 184, 255))
         image.thumbnail((size, size), Image.Resampling.LANCZOS)
         ctk_image = ctk.CTkImage(light_image=image, dark_image=image, size=(size, size))
-        self.icon_images[(path, size)] = ctk_image
+        # Bound the in-memory thumbnail cache because preview file fingerprints can churn over long sessions.
+        remember_icon_image(self.icon_images, key, ctk_image)
         return ctk_image
+
+    def _image_cache_signature(self, path: Path) -> ImageCacheSignature:
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        return stat.st_mtime_ns, stat.st_size
 
     def _icon_button_color(self, icon: Path) -> str | tuple[str, str]:
         if self.selected_icon and icon == self.selected_icon:
@@ -1182,12 +1270,12 @@ class IconMapperApp(ctk.CTk):
         return source.stat().st_mtime > generated.stat().st_mtime
 
     def _find_existing_mapping(self, target: Path, known_key: str) -> AppMapping | None:
-        resolved = str(target.resolve()).lower()
+        normalized = normalized_target_key(target)
         for mapping in self.store.mappings:
             if known_key and mapping.known_key == known_key:
                 return mapping
             try:
-                if str(Path(mapping.shortcut_path).resolve()).lower() == resolved:
+                if normalized_target_key(Path(mapping.shortcut_path)) == normalized:
                     return mapping
             except OSError:
                 if mapping.shortcut_path.lower() == str(target).lower():

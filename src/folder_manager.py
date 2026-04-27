@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import os
-import hashlib
 import shutil
 import subprocess
 from pathlib import Path
 
+from src.file_hashing import sha1_digest_prefix
 from src.shell_notify import notify_shell_dir_changed
 
 
@@ -158,10 +158,7 @@ def _merge_desktop_ini(path: Path, relative_icon: str) -> str:
 
 
 def _managed_icon_name(icon_path: Path) -> str:
-    try:
-        digest = hashlib.sha1(icon_path.read_bytes()).hexdigest()[:12]
-    except OSError:
-        digest = hashlib.sha1(str(icon_path).encode("utf-8", errors="ignore")).hexdigest()[:12]
+    digest = sha1_digest_prefix(icon_path)
     return f"{MANAGED_ICON_PREFIX}{digest}.ico"
 
 

@@ -2,21 +2,36 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from collections import OrderedDict
 from pathlib import Path
 from unittest import mock
 
 from PIL import Image
 
-from src.app_discovery import _group_for_name
-from src.folder_manager import _merge_desktop_ini, read_folder_icon
+from src.app_discovery import _discover_shortcuts, _group_for_name
+from src.folder_manager import _managed_icon_name, _merge_desktop_ini, read_folder_icon
 import src.folder_manager as folder_manager
 import src.icon_pipeline as icon_pipeline
-from src.icon_pipeline import output_path_for, process_icon
+from src.icon_pipeline import discover_png_entries, output_path_for, process_icon, snapshot_pngs
 from src.mapping_store import MappingStore
 import src.reapply_service as reapply_service
+from src.shortcut_manager import _file_digest
+from src.ui import build_gallery_entries, discover_gallery_icons, remember_icon_image
 
 
 class IconPipelineTests(unittest.TestCase):
+    def test_discover_png_entries_capture_mtime_once_for_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = Path(tmp) / "icons-in"
+            source = input_dir / "social" / "whatsapp.png"
+            source.parent.mkdir(parents=True)
+            Image.new("RGBA", (16, 16), (0, 180, 90, 255)).save(source)
+
+            entries = discover_png_entries(input_dir)
+
+            self.assertEqual([path for path, _mtime_ns in entries], [source])
+            self.assertEqual(snapshot_pngs(entries), ((str(source), source.stat().st_mtime_ns),))
+
     def test_process_icon_generates_clean_png_and_ico(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -61,6 +76,61 @@ class IconPipelineTests(unittest.TestCase):
                 )
 
             self.assertEqual(fit_square.call_count, 1)
+
+    def test_discover_gallery_icons_skips_output_scan_when_sources_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source_pngs = [base / "icons-in" / "sample.png"]
+
+            with mock.patch.object(Path, "rglob", side_effect=AssertionError("rglob should not run")):
+                icons = discover_gallery_icons(source_pngs, base / "icons-out")
+
+            self.assertEqual(icons, [])
+
+    def test_remember_icon_image_replaces_stale_signature_and_bounds_cache(self) -> None:
+        cache: OrderedDict[tuple[Path, int, tuple[int, int] | None], object] = OrderedDict()
+        path = Path("icons-in/demo.png")
+
+        remember_icon_image(cache, (path, 44, (1, 100)), object(), limit=2)
+        remember_icon_image(cache, (Path("icons-in/older.png"), 44, (1, 50)), object(), limit=2)
+        remember_icon_image(cache, (path, 44, (2, 120)), object(), limit=2)
+
+        self.assertEqual(len(cache), 2)
+        self.assertNotIn((path, 44, (1, 100)), cache)
+        self.assertIn((path, 44, (2, 120)), cache)
+
+        remember_icon_image(cache, (Path("icons-in/newest.png"), 44, (3, 140)), object(), limit=2)
+
+        self.assertEqual(len(cache), 2)
+        self.assertNotIn((Path("icons-in/older.png"), 44, (1, 50)), cache)
+        self.assertIn((path, 44, (2, 120)), cache)
+
+    def test_build_gallery_entries_precomputes_group_search_and_ready_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            input_dir = base / "icons-in"
+            output_dir = base / "icons-out"
+            source = input_dir / "social" / "whatsapp.png"
+            generated = output_dir / "ico" / "social" / "whatsapp.ico"
+            fallback_ico = output_dir / "ico" / "archive" / "legacy.ico"
+            source.parent.mkdir(parents=True)
+            generated.parent.mkdir(parents=True)
+            fallback_ico.parent.mkdir(parents=True)
+            Image.new("RGBA", (16, 16), (0, 180, 90, 255)).save(source)
+            generated.write_bytes(b"ico")
+            fallback_ico.write_bytes(b"ico")
+
+            entries = build_gallery_entries(input_dir, output_dir, [source, fallback_ico])
+
+            self.assertEqual(len(entries), 2)
+            self.assertEqual(entries[0].group, "social")
+            self.assertEqual(entries[0].relative_text, "social\\whatsapp.png")
+            self.assertEqual(entries[0].search_text, "social\\whatsapp.png")
+            self.assertEqual(entries[0].generated_path, generated)
+            self.assertTrue(entries[0].ready)
+            self.assertEqual(entries[1].group, "archive")
+            self.assertEqual(entries[1].generated_path, fallback_ico)
+            self.assertTrue(entries[1].ready)
 
 
 class MappingStoreTests(unittest.TestCase):
@@ -174,8 +244,41 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(_group_for_name("Visual Studio Code"), "Dev")
         self.assertEqual(_group_for_name("7-Zip Help"), "Pessoal")
 
+    def test_discover_shortcuts_builds_keys_without_path_resolve(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            appdata = base / "AppData"
+            desktop = base / "Desktop"
+            programs = appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+            programs.mkdir(parents=True)
+            desktop.mkdir(parents=True)
+            shortcut = programs / "Demo Tool.lnk"
+            shortcut.write_bytes(b"")
+
+            env = {"APPDATA": str(appdata), "PROGRAMDATA": str(base / "ProgramData"), "PUBLIC": str(base / "Public")}
+            with mock.patch.dict("os.environ", env, clear=False):
+                with mock.patch("pathlib.Path.home", return_value=base):
+                    with mock.patch.object(Path, "resolve", side_effect=AssertionError("resolve should not run")):
+                        targets = _discover_shortcuts()
+
+            self.assertEqual(len(targets), 1)
+            self.assertTrue(targets[0].key.startswith("shortcut:"))
+            self.assertEqual(targets[0].path, str(shortcut))
+
 
 class FolderIniTests(unittest.TestCase):
+    def test_managed_icon_digest_streams_without_read_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            icon = Path(tmp) / "source.ico"
+            icon.write_bytes(b"ico-data" * 32)
+
+            with mock.patch.object(Path, "read_bytes", side_effect=AssertionError("read_bytes should not run")):
+                folder_name = _managed_icon_name(icon)
+                shortcut_digest = _file_digest(icon)
+
+        self.assertEqual(folder_name, f"folder-{shortcut_digest}.ico")
+        self.assertEqual(len(shortcut_digest), 12)
+
     def test_merge_preserves_music_shell_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "desktop.ini"

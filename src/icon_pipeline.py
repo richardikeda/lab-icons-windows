@@ -20,8 +20,24 @@ class ProcessedIcon:
     png_output_path: Path
 
 
+def discover_png_entries(input_dir: Path) -> list[tuple[Path, int]]:
+    entries: list[tuple[Path, int]] = []
+    for path in input_dir.rglob("*.png"):
+        if not path.is_file():
+            continue
+        try:
+            entries.append((path, path.stat().st_mtime_ns))
+        except OSError:
+            continue
+    return entries
+
+
 def discover_pngs(input_dir: Path) -> list[Path]:
-    return sorted(path for path in input_dir.rglob("*.png") if path.is_file())
+    return sorted(path for path, _mtime_ns in discover_png_entries(input_dir))
+
+
+def snapshot_pngs(entries: list[tuple[Path, int]]) -> tuple[tuple[str, int], ...]:
+    return tuple(sorted((str(path), mtime_ns) for path, mtime_ns in entries))
 
 
 def icon_group_for(input_dir: Path, png_path: Path) -> str:
