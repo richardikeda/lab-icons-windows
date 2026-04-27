@@ -98,6 +98,25 @@ class MappingStoreTests(unittest.TestCase):
 
             self.assertEqual(path.stat().st_mtime_ns, first_stat.st_mtime_ns)
 
+    def test_save_skips_unchanged_file_without_rereading_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mappings.json"
+            store = MappingStore(path)
+
+            with mock.patch.object(Path, "read_text", side_effect=AssertionError("read_text should not run")):
+                store.save()
+
+    def test_save_rewrites_when_disk_file_changes_externally(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mappings.json"
+            store = MappingStore(path)
+            original = path.read_text(encoding="utf-8")
+            path.write_text('{"version":999,"settings":{"external":true},"mappings":[]}', encoding="utf-8")
+
+            store.save()
+
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+
     def test_load_accepts_utf16_mappings_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mappings.json"

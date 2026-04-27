@@ -35,6 +35,8 @@ class MappingStore:
             "startup_reapply_enabled": False,
         }
         self.mappings: list[AppMapping] = []
+        self._last_saved_serialized: str | None = None
+        self._last_saved_signature: tuple[int, int] | None = None
         self.load()
 
     def load(self) -> None:
@@ -45,21 +47,18 @@ class MappingStore:
         data = self._load_json()
         self.settings = data.get("settings", self.settings)
         self.mappings = [AppMapping(**self._normalize_mapping(item)) for item in data.get("mappings", [])]
+        self._remember_saved_state()
 
     def save(self) -> None:
-        payload = {
-            "version": 1,
-            "settings": self.settings,
-            "mappings": [asdict(mapping) for mapping in self.mappings],
-        }
-        serialized = json.dumps(payload, indent=2, ensure_ascii=False)
-        if self.path.exists() and self.path.read_text(encoding="utf-8") == serialized:
+        serialized = self._serialize()
+        if serialized == self._last_saved_serialized and self._current_signature() == self._last_saved_signature:
             return
 
         temp_path = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
         try:
             temp_path.write_text(serialized, encoding="utf-8")
             os.replace(temp_path, self.path)
+            self._remember_saved_state(serialized)
         finally:
             if temp_path.exists():
                 temp_path.unlink()
@@ -137,6 +136,25 @@ class MappingStore:
         if last_error:
             raise last_error
         raise ValueError(f"Unable to load mapping file: {self.path}")
+
+    def _serialize(self) -> str:
+        payload = {
+            "version": 1,
+            "settings": self.settings,
+            "mappings": [asdict(mapping) for mapping in self.mappings],
+        }
+        return json.dumps(payload, indent=2, ensure_ascii=False)
+
+    def _current_signature(self) -> tuple[int, int] | None:
+        try:
+            stat = self.path.stat()
+        except OSError:
+            return None
+        return stat.st_mtime_ns, stat.st_size
+
+    def _remember_saved_state(self, serialized: str | None = None) -> None:
+        self._last_saved_serialized = serialized if serialized is not None else self._serialize()
+        self._last_saved_signature = self._current_signature()
 
     def _is_empty_or_comment_only(self, text: str) -> bool:
         lines = [line.strip() for line in text.splitlines()]
