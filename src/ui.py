@@ -218,8 +218,8 @@ class IconMapperApp(ctk.CTk):
             text_color="#aab7cc",
             compound="top",
             font=ctk.CTkFont(size=13, weight="bold"),
-            width=120,
-            height=132,
+            width=152,
+            height=168,
         )
         arrow = ctk.CTkLabel(preview_stage, text="->", text_color="#7b8aa1", font=ctk.CTkFont(size=34))
         self.custom_preview = ctk.CTkLabel(
@@ -228,8 +228,8 @@ class IconMapperApp(ctk.CTk):
             text_color="#f8fafc",
             compound="top",
             font=ctk.CTkFont(size=14, weight="bold"),
-            width=168,
-            height=168,
+            width=208,
+            height=208,
             fg_color="#263551",
             corner_radius=24,
         )
@@ -1023,7 +1023,7 @@ class IconMapperApp(ctk.CTk):
         return self._sized_icon_image(path, 44)
 
     def _preview_image(self, path: Path) -> ctk.CTkImage:
-        return self._sized_icon_image(path, 96)
+        return self._sized_icon_image(path, 128)
 
     def _sized_icon_image(self, path: Path, size: int) -> ctk.CTkImage:
         cached = self.icon_images.get((path, size))

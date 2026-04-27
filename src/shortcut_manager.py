@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import shutil
 from pathlib import Path
+
+from src.shell_notify import notify_shell_item_changed
 
 
 class ShortcutError(RuntimeError):
@@ -21,34 +25,53 @@ def read_shortcut_icon(shortcut_path: Path) -> str:
 
 def apply_shortcut_icon(shortcut_path: Path, ico_path: Path) -> None:
     if not is_windows_shortcut(shortcut_path):
-        raise ShortcutError("O protótipo altera apenas atalhos .lnk.")
+        raise ShortcutError("O app altera apenas atalhos .lnk.")
     if not shortcut_path.exists():
-        raise ShortcutError(f"Atalho não encontrado: {shortcut_path}")
+        raise ShortcutError(f"Atalho nao encontrado: {shortcut_path}")
     if not ico_path.exists():
-        raise ShortcutError(f"Ícone não encontrado: {ico_path}")
+        raise ShortcutError(f"Icone nao encontrado: {ico_path}")
 
+    applied_icon = _applied_shortcut_icon(ico_path)
     shell_link = _load_shell_link(shortcut_path)
-    shell_link.SetIconLocation(str(ico_path), 0)
+    shell_link.SetIconLocation(str(applied_icon), 0)
     persist_file = shell_link.QueryInterface(_pythoncom().IID_IPersistFile)
     persist_file.Save(str(shortcut_path), 0)
+    notify_shell_item_changed(shortcut_path)
 
 
 def restore_shortcut_icon(shortcut_path: Path, icon_location: str) -> None:
     if not is_windows_shortcut(shortcut_path):
-        raise ShortcutError("O protótipo altera apenas atalhos .lnk.")
+        raise ShortcutError("O app altera apenas atalhos .lnk.")
     if not shortcut_path.exists():
-        raise ShortcutError(f"Atalho não encontrado: {shortcut_path}")
+        raise ShortcutError(f"Atalho nao encontrado: {shortcut_path}")
     icon_path, icon_index = _parse_icon_location(icon_location)
     shell_link = _load_shell_link(shortcut_path)
     shell_link.SetIconLocation(icon_path, icon_index)
     persist_file = shell_link.QueryInterface(_pythoncom().IID_IPersistFile)
     persist_file.Save(str(shortcut_path), 0)
+    notify_shell_item_changed(shortcut_path)
 
 
 def shortcut_has_icon(shortcut_path: Path, ico_path: Path) -> bool:
     current = read_shortcut_icon(shortcut_path)
-    expected = str(ico_path).lower()
+    expected = str(_applied_shortcut_icon(ico_path)).lower()
     return current.lower().startswith(expected)
+
+
+def _applied_shortcut_icon(ico_path: Path) -> Path:
+    digest = _file_digest(ico_path)
+    target = ico_path.parent / ".applied" / f"{ico_path.stem}-{digest}.ico"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        shutil.copy2(ico_path, target)
+    return target
+
+
+def _file_digest(path: Path) -> str:
+    try:
+        return hashlib.sha1(path.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return hashlib.sha1(str(path).encode("utf-8", errors="ignore")).hexdigest()[:12]
 
 
 def _load_shell_link(shortcut_path: Path):

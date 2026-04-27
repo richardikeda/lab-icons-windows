@@ -35,6 +35,9 @@ class IconPipelineTests(unittest.TestCase):
             self.assertEqual(processed.output_path, output_path_for(input_dir, output_dir, source))
             with Image.open(processed.output_path) as ico:
                 self.assertIn((256, 256), ico.ico.sizes())
+                self.assertIn((96, 96), ico.ico.sizes())
+            with Image.open(processed.png_output_path) as png:
+                self.assertEqual(png.size, (1024, 1024))
 
 
 class MappingStoreTests(unittest.TestCase):
@@ -153,6 +156,7 @@ class FolderIniTests(unittest.TestCase):
             self.assertIn("LocalizedResourceName=", merged)
             self.assertIn("InfoTip=", merged)
             self.assertIn("; LabIconsWindows=1", merged)
+            self.assertIn("IconResource=.lab-icons-windows\\folder.ico,0", merged)
             self.assertIn("IconFile=.lab-icons-windows\\folder.ico", merged)
             self.assertNotIn("IconResource=%SystemRoot%", merged)
 

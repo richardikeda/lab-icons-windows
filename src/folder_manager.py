@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import shutil
 import subprocess
 from pathlib import Path
+
+from src.shell_notify import notify_shell_dir_changed
 
 
 class FolderIconError(RuntimeError):
@@ -12,6 +15,7 @@ class FolderIconError(RuntimeError):
 
 MANAGED_DIR = ".lab-icons-windows"
 MANAGED_ICON = "folder.ico"
+MANAGED_ICON_PREFIX = "folder-"
 BACKUP_INI = "desktop.ini.backup"
 
 
@@ -25,7 +29,7 @@ def apply_folder_icon(folder_path: Path, icon_path: Path) -> None:
 
     managed_dir = folder_path / MANAGED_DIR
     managed_dir.mkdir(exist_ok=True)
-    managed_icon = managed_dir / MANAGED_ICON
+    managed_icon = managed_dir / _managed_icon_name(icon_path)
     shutil.copy2(icon_path, managed_icon)
 
     desktop_ini = folder_path / "desktop.ini"
@@ -33,13 +37,14 @@ def apply_folder_icon(folder_path: Path, icon_path: Path) -> None:
     if desktop_ini.exists() and not backup_ini.exists():
         shutil.copy2(desktop_ini, backup_ini)
 
-    content = _merge_desktop_ini(desktop_ini, f"{MANAGED_DIR}\\{MANAGED_ICON}")
+    content = _merge_desktop_ini(desktop_ini, f"{MANAGED_DIR}\\{managed_icon.name}")
     if desktop_ini.exists():
         _attrib("-h", "-s", desktop_ini)
     desktop_ini.write_text(content, encoding="utf-16")
     _attrib("+h", "+s", desktop_ini)
     _attrib("+h", managed_dir)
     _attrib("+s", "+r", folder_path)
+    notify_shell_dir_changed(folder_path)
 
 
 def folder_has_icon(folder_path: Path, icon_path: Path) -> bool:
@@ -47,8 +52,8 @@ def folder_has_icon(folder_path: Path, icon_path: Path) -> bool:
     if not desktop_ini.exists():
         return False
     content = _read_desktop_ini(desktop_ini).lower()
-    managed_icon = str(Path(MANAGED_DIR) / MANAGED_ICON).replace("/", "\\").lower()
-    return "labiconswindows=1" in content and managed_icon in content
+    expected_icon = str(Path(MANAGED_DIR) / _managed_icon_name(icon_path)).replace("/", "\\").lower()
+    return "labiconswindows=1" in content and expected_icon in content
 
 
 def read_folder_icon(folder_path: Path) -> str:
@@ -144,11 +149,20 @@ def _merge_desktop_ini(path: Path, relative_icon: str) -> str:
     additions = [
         "; LabIconsWindows=1",
         "ConfirmFileOp=0",
+        f"IconResource={relative_icon},0",
         f"IconFile={relative_icon}",
         "IconIndex=0",
     ]
     lines[insert_at:insert_at] = additions
     return "\n".join(lines) + "\n"
+
+
+def _managed_icon_name(icon_path: Path) -> str:
+    try:
+        digest = hashlib.sha1(icon_path.read_bytes()).hexdigest()[:12]
+    except OSError:
+        digest = hashlib.sha1(str(icon_path).encode("utf-8", errors="ignore")).hexdigest()[:12]
+    return f"{MANAGED_ICON_PREFIX}{digest}.ico"
 
 
 def _normalize_icon_location(folder_path: Path, value: str) -> str:

@@ -20,15 +20,16 @@ O projeto prioriza seguranca: ele nao modifica executaveis, DLLs, arquivos do si
 
 - Remove fundo branco conectado as bordas quando detectado.
 - Suaviza marcas visuais simples nos cantos.
-- Gera ICOs grandes e compativeis com Windows: 16, 24, 32, 48, 64, 128 e 256 px.
-- Mantem tambem um PNG limpo em `icons-out/png/` para preview e usos futuros.
+- Gera ICOs grandes e compativeis com Windows: 16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 128 e 256 px.
+- Mantem tambem um PNG limpo em `icons-out/png/` em 1024 px para preview e usos futuros.
 
 ### Aplicacao em apps e pastas
 
 - Atalhos usam alteracao segura do proprio `.lnk`.
 - Pastas usam `desktop.ini`, mecanismo padrao do Windows para icones de pasta.
 - O app preserva metadados de pastas especiais, como Music, Documents e Pictures.
-- Ao aplicar icone em pasta, o ICO e copiado para `.lab-icons-windows/folder.ico` dentro da propria pasta.
+- Ao aplicar icone em pasta, o ICO e copiado para `.lab-icons-windows/` dentro da propria pasta.
+- O arquivo aplicado recebe hash no nome para evitar que o Explorer reutilize cache antigo de icone.
 - O app le `desktop.ini` em UTF-16/UTF-8, entende `IconFile`, `IconResource`, caminhos relativos e indice do icone.
 - O painel central mostra original e atual/customizado.
 - **Salvar e aplicar** grava o mapeamento e aplica o icone em uma unica acao.

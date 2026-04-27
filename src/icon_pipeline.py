@@ -8,7 +8,8 @@ from pathlib import Path
 from PIL import Image
 
 
-ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
+ICON_SIZES = (16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 128, 256)
+CLEAN_PNG_SIZE = 1024
 
 
 @dataclass(frozen=True)
@@ -146,8 +147,8 @@ def save_as_ico(image: Image.Image, output_path: Path) -> None:
 
 def save_clean_png(image: Image.Image, output_path: Path) -> None:
     square = _fit_square_canvas(image)
-    if square.size != (512, 512):
-        square = square.resize((512, 512), Image.Resampling.LANCZOS)
+    if square.size != (CLEAN_PNG_SIZE, CLEAN_PNG_SIZE):
+        square = square.resize((CLEAN_PNG_SIZE, CLEAN_PNG_SIZE), Image.Resampling.LANCZOS)
     square.save(output_path, format="PNG", optimize=True)
 
 
