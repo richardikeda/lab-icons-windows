@@ -38,6 +38,7 @@ Lab Icons Windows.spec
 config/test-mappings.json
 config/mappings.json
 config/icon-cache/
+icons-in/
 config/managed-shortcuts/
 config/performance.log
 
