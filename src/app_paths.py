@@ -19,6 +19,7 @@ class AppPaths:
     config_dir: Path
     mappings_file: Path
     performance_log: Path
+    logs_dir: Path
     icon_cache_dir: Path
     managed_shortcuts_dir: Path
     backup_dir: Path
@@ -56,6 +57,7 @@ class AppPaths:
             config_dir=config_dir,
             mappings_file=config_dir / "mappings.json",
             performance_log=config_dir / "performance.log",
+            logs_dir=_local_app_data_dir() / "Logs",
             icon_cache_dir=config_dir / "icon-cache",
             managed_shortcuts_dir=config_dir / "managed-shortcuts",
             backup_dir=_local_app_data_dir() / "Backups",
@@ -68,6 +70,7 @@ class AppPaths:
             self.input_dir,
             self.output_dir,
             self.config_dir,
+            self.logs_dir,
             self.icon_cache_dir,
             self.managed_shortcuts_dir,
             self.backup_dir,

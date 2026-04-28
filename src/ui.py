@@ -36,6 +36,7 @@ from src.icon_preview import preview_for_icon_location
 from src.mapping_store import AppMapping, MappingStore
 from src.perf_logger import PerfLogger
 from src.reapply_service import apply_mapping, capture_original_icon, reapply_changed, restore_mapping
+from src.rollback_report import restore_all_to_default, rollback_counts
 from src.shortcut_manager import ShortcutError
 from src.startup_manager import StartupError, disable_startup_reapply, enable_startup_reapply, is_startup_reapply_enabled
 from src.theme_manager import ThemeImportError, ThemeImportResult, delete_theme, import_theme
@@ -698,13 +699,13 @@ class IconMapperApp(ctk.CTk):
         ).grid(row=0, column=2, padx=(0, 8), sticky="ew")
         ctk.CTkButton(
             bulk,
-            text="Remover todos customizados",
+            text="Restaurar todos para o padrao",
             height=36,
             fg_color="#5f2430",
             hover_color="#7f1d1d",
             text_color="#fee2e2",
             corner_radius=12,
-            command=self.remove_all_customized,
+            command=self.restore_all_to_default,
         ).grid(row=0, column=3, sticky="ew")
 
         ctk.CTkLabel(
@@ -1463,25 +1464,48 @@ class IconMapperApp(ctk.CTk):
         self.refresh_discovered_list()
         self.set_status("Item removido.")
 
-    def remove_all_customized(self) -> None:
+    def restore_all_to_default(self) -> None:
+        counts = rollback_counts(self.store.mappings)
+        if counts.total == 0:
+            messagebox.showinfo("Restaurar todos para o padrao", "Nao ha customizacoes ativas para restaurar.")
+            return
+        detail = "\n".join(
+            [
+                "Restaurar todas as customizacoes visuais para o padrao?",
+                "",
+                f"Total de customizacoes: {counts.total}",
+                f"Atalhos: {counts.shortcuts}",
+                f"Pastas: {counts.folders}",
+                f"Itens associados a temas: {counts.themed}",
+                f"Itens com backup disponivel: {counts.with_backup}",
+                f"Itens sem backup disponivel: {counts.without_backup}",
+                "",
+                "Os mapeamentos, temas, icones importados e backups serao preservados.",
+            ]
+        )
         if not messagebox.askyesno(
-            "Remover todos customizados",
-            "Isso tentara restaurar atalhos e remover desktop.ini criado pelo app nas pastas. Continuar?",
+            "Restaurar todos para o padrao",
+            detail,
         ):
             return
-        errors = 0
-        for mapping in list(self.store.mappings):
-            if mapping.is_customized:
-                try:
-                    restore_mapping(mapping)
-                except (ShortcutError, FolderIconError):
-                    errors += 1
-        self.store.mappings = [mapping for mapping in self.store.mappings if not mapping.is_customized]
-        self.store.save()
-        self.selected_mapping = None
+        result = restore_all_to_default(self.store, self.paths.logs_dir)
         self.refresh_mapping_list()
         self.refresh_discovered_list()
-        self.set_status(f"Customizacoes removidas. Erros: {errors}.")
+        restored = len(result.report.restored)
+        failures = len(result.report.errors)
+        summary = (
+            f"Restaurados: {restored}\n"
+            f"Falhas: {failures}\n"
+            f"Relatorio: {result.report_path}"
+        )
+        if failures:
+            messagebox.showwarning("Restaurar todos para o padrao", summary)
+        else:
+            messagebox.showinfo("Restaurar todos para o padrao", summary)
+        self.set_status(f"Restauracao global concluida: {restored} restaurado(s), {failures} falha(s).")
+
+    def remove_all_customized(self) -> None:
+        self.restore_all_to_default()
 
     def load_icon_group(self) -> None:
         folder = filedialog.askdirectory(title="Escolha um grupo dentro de icons-out/ico", initialdir=str(self.output_dir / "ico"))

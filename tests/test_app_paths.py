@@ -22,9 +22,11 @@ class AppPathsTests(unittest.TestCase):
             self.assertEqual(app_paths.output_dir, repo / "icons-out")
             self.assertEqual(app_paths.mappings_file, repo / "config" / "mappings.json")
             self.assertEqual(app_paths.backup_dir, local_app_data / APP_DATA_DIR_NAME / "Backups")
+            self.assertEqual(app_paths.logs_dir, local_app_data / APP_DATA_DIR_NAME / "Logs")
             self.assertTrue((repo / "icons-in").is_dir())
             self.assertTrue((repo / "config" / "managed-shortcuts").is_dir())
             self.assertTrue((local_app_data / APP_DATA_DIR_NAME / "Backups").is_dir())
+            self.assertTrue((local_app_data / APP_DATA_DIR_NAME / "Logs").is_dir())
 
     def test_frozen_runtime_uses_local_app_data_and_copies_legacy_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -50,6 +52,7 @@ class AppPathsTests(unittest.TestCase):
             self.assertEqual(app_paths.output_dir, expected_data_dir / "icons-out")
             self.assertEqual(app_paths.mappings_file, expected_data_dir / "config" / "mappings.json")
             self.assertEqual(app_paths.backup_dir, local_app_data / APP_DATA_DIR_NAME / "Backups")
+            self.assertEqual(app_paths.logs_dir, local_app_data / APP_DATA_DIR_NAME / "Logs")
             self.assertTrue(app_paths.mappings_file.exists())
 
     def test_startup_shortcut_targets_frozen_executable_directly(self) -> None:

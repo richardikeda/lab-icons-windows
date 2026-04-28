@@ -52,6 +52,7 @@ lab-icons-windows/
     icon_preview.py
     mapping_store.py
     perf_logger.py
+    rollback_report.py
     reapply_service.py
     shell_notify.py
     shortcut_manager.py
@@ -89,6 +90,8 @@ Contem a interface CustomTkinter e orquestra os fluxos de usuario:
 - reaplicacao manual;
 - visualizacao de `mappings.json`;
 - importacao e exclusao de temas.
+- revisao de temas antes de aplicar;
+- restauracao global com relatorio estruturado.
 
 A UI evita renderizar listas pesadas antes da hora. A lista de apps detectados so e desenhada quando a aba `Detectados` e aberta, e filtros usam indice textual precomputado.
 
@@ -150,6 +153,8 @@ Decide se um icone precisa ser reaplicado. Para cada mapeamento customizado:
 - captura icone original antes da primeira aplicacao;
 - restaura icone original quando solicitado.
 
+Para rollback global, a UI chama `src.rollback_report.restore_all_to_default()`, que restaura item por item via `restore_mapping`, marca sucesso com `is_customized=false`, mantem falhas como customizadas e preserva todos os metadados do mapping.
+
 No boot, `app.py --reapply-once` usa esse servico para recuperar customizacoes perdidas por atualizacoes de aplicativos ou alteracoes do Windows.
 
 ### `src/mapping_store.py`
@@ -166,6 +171,7 @@ O arquivo guarda:
 - caminho do ICO aplicado;
 - caminho do PNG limpo;
 - icone original;
+- caminhos de backup real (`backup_icon_path`, `backup_desktop_ini_path`, `backup_created_at`);
 - estado `is_customized`;
 - estado `auto_reapply`;
 - chave conhecida de descoberta;
@@ -202,7 +208,10 @@ Na importacao:
 - existe limite de quantidade e tamanho total;
 - somente PNGs declarados no manifesto sao copiados;
 - os arquivos vao para `icons-in/themes/<Tema>/...`;
-- associacoes sao criadas quando o app encontra destino compatível.
+- os PNGs copiados sao enviados para uma tela de revisao antes de aplicar;
+- associacoes exatas ficam confirmadas, sugestoes fuzzy exigem confirmacao e itens nao encontrados podem receber associacao manual;
+
+Associacoes manuais sao persistidas em `.lab-icons-theme-associations.json` dentro da pasta do tema importado, sem alterar ZIPs ou pastas originais.
 
 Na exclusao de tema, o app remove a pasta do tema e os mapeamentos associados. Se algum item estava customizado, tenta restaurar antes de remover o mapeamento.
 
@@ -266,6 +275,10 @@ O app usa eventos especificos para item ou pasta, evitando operacoes globais agr
 
 Registra metricas em `config/performance.log` na pasta de dados do ambiente atual, em formato JSON Lines. O objetivo e medir rotas de inicializacao, descoberta, renderizacao e processamento sem adicionar dependencias pesadas.
 
+### `src/rollback_report.py`
+
+Calcula contagens de rollback, executa restauracao global e grava relatorios JSON em `%LOCALAPPDATA%\LabIcons\Logs\`. O relatorio contem timestamp, totais, itens restaurados, itens com erro, alvo, tipo, tema, caminhos de backup e mensagem de erro. O fluxo nao remove temas, arquivos de tema nem mapeamentos.
+
 ## 5. Fluxo de Uso Esperado
 
 ### Fluxo manual
@@ -297,8 +310,18 @@ Registra metricas em `config/performance.log` na pasta de dados do ambiente atua
 3. App valida manifesto.
 4. App copia PNGs declarados para `icons-in/themes/<Tema>/`.
 5. App atualiza a biblioteca visual.
-6. App tenta associar entradas do manifesto a destinos detectados.
-7. App cria mapeamentos reaplicaveis para associacoes encontradas.
+6. App abre a tela de revisao do tema.
+7. Usuario confirma sugestoes fuzzy ou associa itens manualmente.
+8. App cria e aplica mapeamentos reaplicaveis apenas para itens confirmados.
+
+### Fluxo de rollback global
+
+1. Usuario aciona **Restaurar todos para o padrao**.
+2. App calcula contagens de customizacoes, atalhos, pastas, itens de tema e disponibilidade de backup.
+3. Usuario confirma a operacao.
+4. App tenta restaurar cada mapping customizado via `restore_mapping`.
+5. Sucessos ficam com `is_customized=false`; falhas permanecem `is_customized=true`.
+6. App salva `rollback-report-YYYYMMDD-HHMMSS.json` em `%LOCALAPPDATA%\LabIcons\Logs\`.
 
 ## 6. Como Deve Funcionar
 
@@ -306,6 +329,7 @@ O comportamento correto esperado e:
 
 - Qualquer customizacao aplicada deve ficar registrada em `mappings.json`.
 - O icone original deve ser capturado antes da primeira aplicacao sempre que o Windows permitir.
+- Backups reais devem ser mantidos em `%LOCALAPPDATA%\LabIcons\Backups\` e usados como fallback de restauracao.
 - Customizacoes devem ser reaplicadas no boot se o usuario mantiver a opcao ativa.
 - A interface deve continuar responsiva durante processamento em lote.
 - A importacao de temas deve ser segura mesmo para ZIPs externos.
@@ -322,6 +346,7 @@ O usuario pode esperar:
 - Persistencia das escolhas entre sessoes.
 - Reaplicacao automatica quando atualizacoes de apps removerem customizacoes.
 - Restauracao de atalhos e pastas customizados pelo app.
+- Restauracao global com relatorio auditavel sem perder mapeamentos ou temas.
 - Importacao de temas sem risco de execucao de scripts.
 - Operacao sem permissao de administrador.
 
@@ -339,6 +364,7 @@ O modelo de seguranca do projeto e conservador:
 - valida caminhos de ZIP e manifesto;
 - limita importacao de tema;
 - preserva backups de `desktop.ini`;
+- preserva backups reais de icones originais;
 - usa copias versionadas dos ICOs aplicados.
 
 Essa abordagem reduz risco de quebrar assinaturas digitais, gerar falsos positivos de antivirus ou afetar outros usuarios da maquina.
@@ -401,6 +427,9 @@ Exemplo simplificado:
       "png_path": "icons-out\\png\\themes\\Meu Tema\\media\\spotify.png",
       "preferred_asset": "ico",
       "original_icon": "C:\\Program Files\\Spotify\\Spotify.exe,0",
+      "backup_icon_path": "C:\\Users\\user\\AppData\\Local\\LabIcons\\Backups\\hash-20260427T200000Z.ico",
+      "backup_desktop_ini_path": "",
+      "backup_created_at": "2026-04-27T20:00:00Z",
       "is_customized": true,
       "known_key": "shortcut:C:\\Users\\user\\Desktop\\Spotify.lnk",
       "auto_reapply": true,

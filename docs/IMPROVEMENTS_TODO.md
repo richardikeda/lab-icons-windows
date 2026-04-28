@@ -17,7 +17,7 @@ Este documento consolida melhorias e regras de arquitetura para proximas iteraco
 
 ## 1. Prioridade Alta
 
-### 1.1 Migrar dados mutaveis para `%LOCALAPPDATA%`
+### 1.1 Migrar dados mutaveis para `%LOCALAPPDATA%` - Concluido
 
 **Problema:** hoje o projeto usa `config/`, `icons-in/` e `icons-out/` ao lado do app. Isso funciona em desenvolvimento, mas em build instalado em `Program Files` causara erro de permissao.
 
@@ -51,7 +51,7 @@ Este documento consolida melhorias e regras de arquitetura para proximas iteraco
 - Nenhum arquivo mutavel e criado em `Program Files`.
 - README e `docs/TECHNICAL.md` documentam os caminhos.
 
-### 1.2 Backup real dos icones originais
+### 1.2 Backup real dos icones originais - Concluido
 
 **Problema:** `mappings.json` guarda a localizacao original, mas nao necessariamente extrai/copia um backup visual `.ico`.
 
@@ -114,16 +114,17 @@ Este documento consolida melhorias e regras de arquitetura para proximas iteraco
 - Aparece no Gerenciador de Tarefas/Inicializar.
 - Nao usa servico, DLL injection ou persistencia oculta.
 
-### 1.4 Rollback global robusto
+### 1.4 Rollback global robusto - Concluido
 
-**Estado atual:** existe remover todos customizados.
+**Estado atual:** implementado como **Restaurar todos para o padrao**.
 
-**Melhoria:**
+**Implementado:**
 
-- Renomear/fortalecer como "Restaurar todos para o padrao".
-- Mostrar contagem antes de executar.
-- Gerar relatorio de erros.
-- Nao apagar mapeamentos antes de tentar restaurar.
+- Mostra contagem de customizacoes, atalhos, pastas, itens de tema e disponibilidade de backup antes de executar.
+- Restaura item por item via `restore_mapping`, usando `original_icon`, `backup_icon_path` e `backup_desktop_ini_path` conforme disponivel.
+- Mantem mapeamentos, temas, assets importados e associacoes manuais.
+- Marca sucessos com `is_customized=false` e mantem falhas como `is_customized=true`.
+- Gera relatorio JSON em `%LOCALAPPDATA%\LabIcons\Logs\rollback-report-YYYYMMDD-HHMMSS.json`.
 
 **Arquivos afetados:**
 
@@ -139,11 +140,11 @@ Este documento consolida melhorias e regras de arquitetura para proximas iteraco
 
 ## 2. Prioridade Media
 
-### 2.1 Importacao e aplicacao inteligente de temas
+### 2.1 Importacao e aplicacao inteligente de temas - Concluido
 
-**Estado atual:** importa ZIP/pasta com manifesto e cria alguns mapeamentos.
+**Estado atual:** importa ZIP/pasta com manifesto, abre tela dedicada de revisao, separa encontrados/sugestoes/nao encontrados/erros, exige confirmacao para fuzzy matching, permite associacao manual persistida em `.lab-icons-theme-associations.json` e aplica somente itens confirmados.
 
-**Melhorar:**
+**Implementado:**
 
 - Tela dedicada de temas.
 - Mostrar:
@@ -433,13 +434,9 @@ Validacao minima:
 
 ## 7. Ordem Recomendada de Execucao
 
-1. Criar `app_paths.py` e migrar dados mutaveis para `%LOCALAPPDATA%`.
-2. Implementar backups reais de icones originais.
-3. Fortalecer rollback global.
-4. Evoluir importacao/aplicacao de temas com tela dedicada.
-5. Adicionar watchdog em bandeja.
-6. Adicionar elevacao sob demanda.
-7. Melhorar cache de thumbnails em disco.
-8. Avaliar drag and drop.
-9. Preparar instalador.
-10. Planejar assinatura de codigo.
+1. Adicionar watchdog em bandeja.
+2. Adicionar elevacao sob demanda.
+3. Melhorar cache de thumbnails em disco.
+4. Avaliar drag and drop.
+5. Preparar instalador.
+6. Planejar assinatura de codigo.

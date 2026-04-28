@@ -15,7 +15,7 @@ O projeto prioriza seguranca: ele nao modifica executaveis, DLLs, arquivos `.mun
 - Ao selecionar um PNG, o app prepara apenas aquele icone em segundo plano.
 - O botao **Processar pacote em background** continua existindo para preparar todos os PNGs sem travar a tela.
 - O botao **Abrir pasta icons-out** abre a pasta de icones gerados do ambiente atual no Explorer.
-- O botao **Importar tema** aceita ZIP ou pasta com PNGs e manifesto JSON.
+- O botao **Importar tema** aceita ZIP ou pasta com PNGs e manifesto JSON e abre uma tela de revisao antes de aplicar.
 - O botao **Excluir tema** remove os PNGs importados daquele tema e os mapeamentos associados.
 
 ### Geracao de icones
@@ -86,13 +86,17 @@ Campos suportados:
 - `icons[].target_type` ou `kind`: `shortcut` ou `folder`.
 - `icons[].target_path` ou `path`: caminho explicito do alvo, quando o nome nao for suficiente.
 
-Na importacao, os PNGs sao copiados para `icons-in/themes/<Tema>/...` dentro da pasta de dados do ambiente atual, aparecem agrupados na biblioteca e podem gerar mapeamentos automaticos quando o app encontra um destino detectado com nome correspondente. O processamento dos ICOs continua usando o pipeline normal do app.
+Na importacao, os PNGs sao copiados para `icons-in/themes/<Tema>/...` dentro da pasta de dados do ambiente atual e aparecem em uma janela **Tema: <nome>**. A janela separa itens encontrados, sugestoes fuzzy que exigem confirmacao, itens nao encontrados e erros. O usuario pode confirmar sugestoes, associar manualmente um destino detectado, ignorar itens e aplicar apenas os itens confirmados. Associacoes manuais ficam em `.lab-icons-theme-associations.json` dentro da pasta importada do tema; o ZIP original nunca e alterado.
 
 ### Reaplicacao automatica
 
 A opcao global cria um atalho na pasta Startup do usuario. Ao iniciar o Windows, o app roda em modo de reaplicacao unica e reaplica icones customizados que tenham sido trocados por atualizacoes de apps ou alteracoes do Windows.
 
 Por padrao, novas customizacoes ficam com reaplicacao ligada. O arquivo `config/mappings.json` guarda o icone original, o icone aplicado, o PNG de origem, o tipo do alvo, o tema associado quando existir e os dados de boot. A interface tambem tem **Ver config** para visualizar esse arquivo sem sair do app.
+
+### Restauracao global
+
+O botao **Restaurar todos para o padrao** restaura o estado visual de todas as customizacoes ativas sem apagar mapeamentos, temas, icones importados ou backups. Antes de executar, ele mostra a contagem de atalhos, pastas, itens de tema e itens com/sem backup. Cada item e restaurado individualmente: atalhos usam `original_icon` e caem para `backup_icon_path` quando o original nao esta disponivel; pastas usam `backup_desktop_ini_path` quando existe e depois o fallback seguro de `desktop.ini` gerenciado. Sucessos ficam com `is_customized=false`; falhas permanecem customizadas para nova tentativa.
 
 ### Aparencia e desempenho
 
@@ -114,7 +118,8 @@ Por padrao, novas customizacoes ficam com reaplicacao ligada. O arquivo `config/
 - A extracao de previews nativos tenta `PrivateExtractIconsW` em 256 px primeiro, o que melhora fidelidade para bibliotecas modernas, executaveis, DLLs e arquivos `.mun` lidos como PE quando o Windows permite; se falhar, usa `ExtractIconEx` e depois `SHGetFileInfo`.
 - A extracao libera `HICON` e `DC` logo apos o uso, evitando acumulo de handles em refreshes repetidos da lista e da galeria.
 - O cache em memoria das miniaturas da UI agora e limitado e substitui entradas antigas do mesmo arquivo quando o preview muda, evitando crescimento continuo de RAM em sessoes longas com muitas atualizacoes de icones.
-- Logs de performance sao gravados em `config/performance.log` na pasta de dados do ambiente atual; se existir um placeholder UTF-16 herdado de redacao local, o app o normaliza uma vez para manter o arquivo legivel como JSON Lines UTF-8.
+- Logs de performance sao gravados em `config/performance.log` na pasta de dados do ambiente atual; relatorios de rollback sao gravados em `%LOCALAPPDATA%\LabIcons\Logs\rollback-report-YYYYMMDD-HHMMSS.json`.
+- Backups reais dos icones originais ficam em `%LOCALAPPDATA%\LabIcons\Backups\`, usando nomes estaveis com hash do alvo/recurso e timestamp quando necessario.
 - O comando `python app.py --perf-smoke` mede o carregamento da janela sem abrir o app para uso normal.
 
 ## Conformidade com Iconografia do Windows
@@ -153,6 +158,8 @@ lab-icons-windows/
     performance.log
     managed-shortcuts/
     icon-cache/
+  Backups/
+  Logs/
   src/
   tests/
 ```
@@ -212,6 +219,9 @@ Em desenvolvimento, os mapeamentos ficam em `config/mappings.json`. Em build/exe
       "png_path": "icons-out\\png\\editors\\notepad.png",
       "preferred_asset": "ico",
       "original_icon": "C:\\Windows\\System32\\notepad.exe,0",
+      "backup_icon_path": "C:\\Users\\you\\AppData\\Local\\LabIcons\\Backups\\hash-20260427T200000Z.ico",
+      "backup_desktop_ini_path": "",
+      "backup_created_at": "2026-04-27T20:00:00Z",
       "is_customized": true,
       "known_key": "shortcut:C:\\Users\\you\\Desktop\\Notepad.lnk",
       "auto_reapply": true,
@@ -227,6 +237,7 @@ O app:
 
 - Em desenvolvimento, trabalha nas pastas locais do projeto.
 - Em build/execucao instalada, grava configuracoes, logs, cache, atalhos gerenciados, `icons-in/` e `icons-out/` em `%LOCALAPPDATA%\LabIcons\`.
+- Grava backups reais em `%LOCALAPPDATA%\LabIcons\Backups\` e relatorios de rollback em `%LOCALAPPDATA%\LabIcons\Logs\`.
 - Altera apenas atalhos `.lnk` e pastas escolhidas pelo usuario.
 - Nao roda como administrador.
 - Nao instala servico em background.
@@ -234,6 +245,7 @@ O app:
 - Nao edita EXE, DLL, MUN ou manifestos AppX.
 - Preserva e faz backup do `desktop.ini` quando customiza pastas.
 - Importa temas sem executar conteudo do pacote; somente PNGs declarados no manifesto sao copiados.
+- Restaura customizacoes globais sem apagar mapeamentos, preservando metadados de tema e associacoes manuais.
 
 Alteracoes de `DefaultIcon` no registro sao adequadas para associacoes de arquivos ou instaladores. Para este app, a rota segura e `.lnk` para atalhos e `desktop.ini` para pastas.
 
@@ -270,7 +282,7 @@ Para gerar um unico `.exe`:
 - Cache persistente dos apps detectados para abrir a tela ainda mais rapido.
 - Filtro por grupo e tipo na biblioteca de icones.
 - Editor manual de temas e aliases de apps conhecidos.
-- Melhor correspondencia em **Carregar grupo de icones**, com fuzzy matching e confirmacao antes de aplicar.
+- Busca/filtro dentro da janela de associacao manual de temas.
 - Exportar pacote de tema a partir dos icones/mapeamentos atuais.
 - Opcao avancada para limpar cache de icones do Explorer quando o Windows demorar a refletir mudancas.
 - Avaliar migracao futura para WinUI 3 se o projeto precisar de integracao visual totalmente nativa.
