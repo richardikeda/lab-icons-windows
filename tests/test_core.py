@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import tempfile
+import threading
 import time
 import unittest
 from collections import OrderedDict
@@ -10,7 +11,7 @@ from unittest import mock
 
 from PIL import Image
 
-from src.app_discovery import _discover_shortcuts, _group_for_name
+from src.app_discovery import _discover_shortcuts, _group_for_name, discover_targets
 from src.folder_manager import _managed_icon_name, _merge_desktop_ini, read_folder_icon
 import src.folder_manager as folder_manager
 import src.icon_pipeline as icon_pipeline
@@ -410,6 +411,60 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(len(targets), 1)
             self.assertTrue(targets[0].key.startswith("shortcut:"))
             self.assertEqual(targets[0].path, str(shortcut))
+
+    def test_discover_targets_runs_sources_in_parallel(self) -> None:
+        common = [
+            DiscoveredTarget(
+                key="folder:a",
+                name="Desktop",
+                group="Pastas do usuario",
+                path="C:/Users/demo/Desktop",
+                target_type="folder",
+            )
+        ]
+        shortcuts = [
+            DiscoveredTarget(
+                key="shortcut:a",
+                name="Demo",
+                group="Pessoal",
+                path="C:/Users/demo/Desktop/Demo.lnk",
+                target_type="shortcut",
+            )
+        ]
+        apps = [
+            DiscoveredTarget(
+                key="appx:a",
+                name="Store App",
+                group="Pessoal",
+                path="Store.App",
+                target_type="appx",
+            )
+        ]
+        started: queue.Queue[str] = queue.Queue()
+        release = threading.Event()
+
+        def gated(name: str, payload: list[DiscoveredTarget]) -> list[DiscoveredTarget]:
+            started.put(name)
+            release.wait(timeout=1)
+            return payload
+
+        with mock.patch("src.app_discovery._discover_common_folders", side_effect=lambda: gated("folders", common)):
+            with mock.patch("src.app_discovery._discover_shortcuts", side_effect=lambda: gated("shortcuts", shortcuts)):
+                with mock.patch("src.app_discovery._discover_start_apps", side_effect=lambda: gated("apps", apps)):
+                    worker = queue.Queue()
+
+                    def run() -> None:
+                        worker.put(discover_targets())
+
+                    thread = threading.Thread(target=run)
+                    thread.start()
+                    seen = {started.get(timeout=1) for _ in range(3)}
+                    release.set()
+                    thread.join(timeout=1)
+
+        self.assertEqual(seen, {"folders", "shortcuts", "apps"})
+        targets = worker.get_nowait()
+        self.assertEqual([target.key for target in targets], ["folder:a", "shortcut:a", "appx:a"])
 
 
 class BatchProcessingTests(unittest.TestCase):

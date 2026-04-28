@@ -3,6 +3,7 @@
 import os
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -282,9 +283,18 @@ def normalized_target_key(path: Path) -> str:
 
 
 def discover_targets() -> list[DiscoveredTarget]:
-    targets = _discover_common_folders()
-    targets.extend(_discover_shortcuts())
-    targets.extend(_discover_start_apps())
+    targets: list[DiscoveredTarget] = []
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [
+            executor.submit(_discover_common_folders),
+            executor.submit(_discover_shortcuts),
+            executor.submit(_discover_start_apps),
+        ]
+        for future in as_completed(futures):
+            try:
+                targets.extend(future.result())
+            except Exception:
+                continue
     unique: dict[str, DiscoveredTarget] = {}
     for target in targets:
         unique.setdefault(target.key, target)

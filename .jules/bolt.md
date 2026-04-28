@@ -41,3 +41,7 @@
 ## 2026-04-27 - Skipped unchanged batch icon work
 **Learning:** The background package processor was re-encoding every PNG on every run even when both the generated `.ico` and cleaned preview `.png` were already newer than the source asset.
 **Action:** Keep future bulk icon work gated by shared output-freshness checks so Windows batch actions skip unchanged files before starting worker threads.
+
+## 2026-04-27 - Parallelized startup target discovery
+**Learning:** Startup discovery time is dominated by three independent tasks: common-folder checks, recursive `.lnk` scanning, and `Get-StartApps`, so running them serially adds avoidable wall-clock delay.
+**Action:** Keep future discovery expansions isolated enough to run concurrently instead of extending the serial startup path.

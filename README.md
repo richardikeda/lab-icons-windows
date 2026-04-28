@@ -113,6 +113,7 @@ O botao **Restaurar todos para o padrao** restaura o estado visual de todas as c
 - A geracao de cada icone reutiliza a mesma base quadrada para PNG e ICO, cortando uma etapa de preparo por arquivo e reduzindo CPU em lotes maiores.
 - O processamento em lote agora pula PNGs cujos `.ico` e previews limpos ja estao atualizados, evitando reencodar toda a biblioteca quando nada mudou.
 - A descoberta de atalhos e pastas evita `Path.resolve()` ao montar chaves internas, usando caminho absoluto normalizado do Windows para reduzir IO extra durante startup e na criacao manual de mapeamentos.
+- A descoberta inicial agora executa em paralelo a leitura das pastas comuns, a varredura de atalhos `.lnk` e o `Get-StartApps`, reduzindo o tempo total de startup quando o Menu Iniciar/Desktop tem muitos itens.
 - A aplicacao de icones em atalhos e pastas agora calcula o nome versionado do ICO com hash em streaming, evitando carregar o arquivo inteiro na memoria a cada reaplicacao.
 - Previews extraidos de `.lnk`, `.exe` e outros arquivos do Windows passam a invalidar o cache automaticamente quando o arquivo de origem muda, evitando miniaturas antigas apos updates de apps ou troca de icone.
 - A extracao de previews nativos tenta `PrivateExtractIconsW` em 256 px primeiro, o que melhora fidelidade para bibliotecas modernas, executaveis, DLLs e arquivos `.mun` lidos como PE quando o Windows permite; se falhar, usa `ExtractIconEx` e depois `SHGetFileInfo`.
